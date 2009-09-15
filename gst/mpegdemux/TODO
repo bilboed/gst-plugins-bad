@@ -1,0 +1,64 @@
+mpegtsparse rebasing
+--------------------
+
+Rationale :
+-----------
+
+  mpegtsparse code is more sane to handle and work with.
+
+  We need a modular demuxer
+
+
+Battleplan :
+------------
+* Figure out code from mpegtsparse which would be also needed for a
+mpeg-ts demuxer (ex: packet/psi/pcr parsing).
+* Extract common code into a base mpegtsbase class.
+* Refactor mpegtsparse to subclass that base class.
+* Create a minimalistic demuxer that creates pads (based on PSI info)
+and outputs ES packets (let's say mpeg audio and video to start with)
+
+
+Code/Design common to a program-spliter and a demuxer :
+-------------------------------------------------------
+* Parsing TS packets
+* Establishing PAT/PMT mapping
+* Handling the notions of Programs/Streams
+* Seeking ?
+
+Ideas to be taken into account for a proper demuxer :
+-----------------------------------------------------
+* Push-based (with inacurrate seeking)
+* Pull-based (with fast *AND* accurate seeking)
+* Modular system to add stream-type specific helper parsing
+  * Doesn't have to be fully fledged, just enough to help any kind of
+  seeking and scanning code.
+* ...
+
+Problems to figure out :
+------------------------
+* clock
+  Needed for proper dvb playback. mpegtsdemux currently does internal
+  clock estimation... to provide a clock with PCR estimations.
+  A proper way to solve that would be to timestamp the buffers at the
+  source element using the system clock, and then adjusting the PCR
+  against those values. (i.e. doing the opposite of what's done in
+  mpegtsdemux, but it will be more accurate since the timestamping is
+  done at the source).
+  
+
+Code structure:
+
+  MpegTSBase
+  +--- MpegTSParse
+  +--- TSDemux
+
+
+Known limitations and problems :
+--------------------------------
+* mpegtspacketizer
+  * Assumes 188 bytes packets. It should support all modes.
+  * offset/timestamp of incoming buffers need to be carried on to the
+  sub-buffers in order for several demuxer features to work correctly.
+* mpegtsparser
+  * SERIOUS room for improvement performance-wise (see callgrind)
