@@ -209,6 +209,7 @@ mpegts_base_init (MpegTSBase * base, MpegTSBaseClass * klass)
       NULL, (GDestroyNotify) mpegts_base_free_program);
   base->psi_pids = g_hash_table_new (g_direct_hash, g_direct_equal);
   base->pes_pids = g_hash_table_new (g_direct_hash, g_direct_equal);
+
   mpegts_base_reset (base);
   base->program_size = sizeof (MpegTSBaseProgram);
 }
@@ -446,8 +447,7 @@ mpegts_base_is_psi (MpegTSBase * base, MpegTSPacketizerPacket * packet)
       }
     } else {
       MpegTSPacketizerStream *stream = (MpegTSPacketizerStream *)
-          g_hash_table_lookup (base->packetizer->streams,
-          GINT_TO_POINTER ((gint) packet->pid));
+          base->packetizer->streams[packet->pid];
 
       if (stream) {
         i = 0;

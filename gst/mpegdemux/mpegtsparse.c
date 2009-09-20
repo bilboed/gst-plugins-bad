@@ -525,7 +525,7 @@ mpegts_parse_push (MpegTSBase * base, MpegTSPacketizerPacket * packet,
   pid = packet->pid;
   buffer = gst_buffer_make_metadata_writable (packet->buffer);
   /* we have the same caps on all the src pads */
-  gst_buffer_set_caps (buffer, parse->packetizer->caps);
+  gst_buffer_set_caps (buffer, base->packetizer->caps);
 
   GST_OBJECT_LOCK (parse);
   /* clear tspad->pushed on pads */
