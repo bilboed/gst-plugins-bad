@@ -47,6 +47,7 @@
 
 #include "gstmpegdemux.h"
 #include "gstmpegtsdemux.h"
+#include "mpegtsbase.h"
 #include "mpegtsparse.h"
 #include "mpegtspacketizer.h"
 
@@ -63,6 +64,8 @@ plugin_init (GstPlugin * plugin)
   if (!gst_flups_demux_plugin_init (plugin))
     return FALSE;
   if (!gst_mpegts_demux_plugin_init (plugin))
+    return FALSE;
+  if (!gst_mpegtsbase_plugin_init (plugin))
     return FALSE;
   if (!gst_mpegtsparse_plugin_init (plugin))
     return FALSE;

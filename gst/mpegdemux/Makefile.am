@@ -10,6 +10,7 @@ libgstmpegdemux_la_SOURCES = \
 	gstmpegtsdemux.c \
 	gstpesfilter.c \
 	gstsectionfilter.c \
+	mpegtsbase.c	\
 	mpegtsparse.c \
 	mpegtspacketizer.c
 
@@ -32,6 +33,7 @@ noinst_HEADERS = \
 	flutspmtinfo.h \
 	flutspmtstreaminfo.h \
 	gstsectionfilter.h \
+	mpegtsbase.h	\
 	mpegtspacketizer.h \
 	mpegtsparse.h
 
