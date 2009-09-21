@@ -173,21 +173,18 @@ mpegts_base_class_init (MpegTSBaseClass * klass)
 
 }
 
-static gboolean
-foreach_psi_pid_remove (gpointer key, gpointer value, gpointer data)
-{
-  return TRUE;
-}
-
 static void
 mpegts_base_reset (MpegTSBase * base)
 {
+  int i;
   mpegts_packetizer_clear (base->packetizer);
-  g_hash_table_foreach_remove (base->psi_pids, foreach_psi_pid_remove, NULL);
+  for (i = 0; i < 8192; i++) {
+    base->is_pes[i] = FALSE;
+    base->known_psi[i] = FALSE;
+  }
 
   /* PAT */
-  g_hash_table_insert (base->psi_pids,
-      GINT_TO_POINTER (0), GINT_TO_POINTER (1));
+  base->known_psi[0] = TRUE;
   if (base->pat != NULL)
     gst_structure_free (base->pat);
   base->pat = NULL;
@@ -207,9 +204,9 @@ mpegts_base_init (MpegTSBase * base, MpegTSBaseClass * klass)
   base->packetizer = mpegts_packetizer_new ();
   base->programs = g_hash_table_new_full (g_direct_hash, g_direct_equal,
       NULL, (GDestroyNotify) mpegts_base_free_program);
-  base->psi_pids = g_hash_table_new (g_direct_hash, g_direct_equal);
-  base->pes_pids = g_hash_table_new (g_direct_hash, g_direct_equal);
 
+  base->is_pes = g_new0 (gboolean, 8192);
+  base->known_psi = g_new0 (gboolean, 8192);
   mpegts_base_reset (base);
   base->program_size = sizeof (MpegTSBaseProgram);
 }
@@ -222,6 +219,8 @@ mpegts_base_dispose (GObject * object)
   if (!base->disposed) {
     g_object_unref (base->packetizer);
     base->disposed = TRUE;
+    g_free (base->known_psi);
+    g_free (base->is_pes);
   }
 
   if (G_OBJECT_CLASS (parent_class)->dispose)
@@ -238,8 +237,6 @@ mpegts_base_finalize (GObject * object)
     base->pat = NULL;
   }
   g_hash_table_destroy (base->programs);
-  g_hash_table_destroy (base->psi_pids);
-  g_hash_table_destroy (base->pes_pids);
 
   if (G_OBJECT_CLASS (parent_class)->finalize)
     G_OBJECT_CLASS (parent_class)->finalize (object);
@@ -403,13 +400,12 @@ mpegts_base_deactivate_pmt (MpegTSBase * base, MpegTSBaseProgram * program)
       gst_structure_id_get (stream, QUARK_PID, G_TYPE_UINT, &pid,
           QUARK_STREAM_TYPE, G_TYPE_UINT, &stream_type, NULL);
       mpegts_base_program_remove_stream (base, program, (guint16) pid);
-      g_hash_table_remove (base->pes_pids, GINT_TO_POINTER ((gint) pid));
+      base->is_pes[pid] = FALSE;
     }
 
     /* remove pcr stream */
     mpegts_base_program_remove_stream (base, program, program->pcr_pid);
-    g_hash_table_remove (base->pes_pids,
-        GINT_TO_POINTER ((gint) program->pcr_pid));
+    base->is_pes[program->pcr_pid] = FALSE;
   }
 }
 
@@ -427,12 +423,10 @@ mpegts_base_is_psi (MpegTSBase * base, MpegTSPacketizerPacket * packet)
     0x66, 0x67, 0x68, 0x69, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F, 0x70, 0x71,
     0x72, 0x73, 0x7E, 0x7F, TABLE_ID_UNSET
   };
-  if (g_hash_table_lookup (base->psi_pids,
-          GINT_TO_POINTER ((gint) packet->pid)) != NULL)
+  if (base->known_psi[packet->pid])
     retval = TRUE;
   /* check is it is a pes pid */
-  if (g_hash_table_lookup (base->pes_pids,
-          GINT_TO_POINTER ((gint) packet->pid)) != NULL)
+  if (base->is_pes[packet->pid])
     return FALSE;
   if (!retval) {
     if (packet->payload_unit_start_indicator) {
@@ -505,17 +499,17 @@ mpegts_base_apply_pat (MpegTSBase * base, GstStructure * pat_info)
       if (program->pmt_pid != pid) {
         if (program->pmt_pid != G_MAXUINT16) {
           /* pmt pid changed */
-          g_hash_table_remove (base->psi_pids,
-              GINT_TO_POINTER ((gint) program->pmt_pid));
+          /* FIXME: when this happens it may still be pmt pid of another
+           * program, so setting to False may make it go through expensive
+           * path in is_psi unnecessarily */
+          base->known_psi[program->pmt_pid] = FALSE;
         }
 
         program->pmt_pid = pid;
-        g_hash_table_insert (base->psi_pids,
-            GINT_TO_POINTER ((gint) pid), GINT_TO_POINTER (1));
+        base->known_psi[pid] = TRUE;
       }
     } else {
-      g_hash_table_insert (base->psi_pids,
-          GINT_TO_POINTER ((gint) pid), GINT_TO_POINTER (1));
+      base->known_psi[pid] = TRUE;
       program = mpegts_base_add_program (base, program_number, pid);
     }
     program->patcount += 1;
@@ -549,7 +543,10 @@ mpegts_base_apply_pat (MpegTSBase * base, GstStructure * pat_info)
 
       mpegts_base_deactivate_pmt (base, program);
       mpegts_base_remove_program (base, program_number);
-      g_hash_table_remove (base->psi_pids, GINT_TO_POINTER ((gint) pid));
+      /* FIXME: when this happens it may still be pmt pid of another
+       * program, so setting to False may make it go through expensive
+       * path in is_psi unnecessarily */
+      base->known_psi[pid] = TRUE;
       mpegts_packetizer_remove_stream (base->packetizer, pid);
     }
 
@@ -592,8 +589,7 @@ mpegts_base_apply_pmt (MpegTSBase * base,
     program->pmt_info = NULL;
   } else {
     /* no PAT?? */
-    g_hash_table_insert (base->psi_pids,
-        GINT_TO_POINTER ((gint) pmt_pid), GINT_TO_POINTER (1));
+    base->known_psi[pmt_pid] = TRUE;
     program = mpegts_base_add_program (base, program_number, pid);
   }
 
@@ -602,8 +598,7 @@ mpegts_base_apply_pmt (MpegTSBase * base,
   program->pmt_pid = pmt_pid;
   program->pcr_pid = pcr_pid;
   mpegts_base_program_add_stream (base, program, (guint16) pcr_pid, -1);
-  g_hash_table_insert (base->pes_pids, GINT_TO_POINTER ((gint) pcr_pid),
-      GINT_TO_POINTER (1));
+  base->is_pes[pcr_pid] = TRUE;
 
   for (i = 0; i < gst_value_list_get_size (new_streams); ++i) {
     value = gst_value_list_get_value (new_streams, i);
@@ -613,8 +608,7 @@ mpegts_base_apply_pmt (MpegTSBase * base,
         QUARK_STREAM_TYPE, G_TYPE_UINT, &stream_type, NULL);
     mpegts_base_program_add_stream (base, program,
         (guint16) pid, (guint8) stream_type);
-    g_hash_table_insert (base->pes_pids, GINT_TO_POINTER ((gint) pid),
-        GINT_TO_POINTER ((gint) 1));
+    base->is_pes[pid] = TRUE;
 
   }
   GST_OBJECT_UNLOCK (base);

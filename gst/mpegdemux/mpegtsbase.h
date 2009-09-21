@@ -78,8 +78,10 @@ struct _MpegTSBase {
 
   GstStructure *pat;
   MpegTSPacketizer *packetizer;
-  GHashTable *psi_pids;
-  GHashTable *pes_pids;
+  /* arrays that say whether a pid is a known psi pid or a pes pid */
+  gboolean *known_psi;
+  gboolean *is_pes;
+
   gboolean disposed;
 
   /* size of the MpegTSBaseProgram structure, can be overridden
