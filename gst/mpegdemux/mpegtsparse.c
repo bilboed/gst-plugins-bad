@@ -84,6 +84,11 @@ enum
   /* FILL ME */
 };
 
+static void
+mpegts_parse_program_started (MpegTSBase * base, MpegTSBaseProgram * program);
+static void
+mpegts_parse_program_stopped (MpegTSBase * base, MpegTSBaseProgram * program);
+
 static GstFlowReturn
 mpegts_parse_push (MpegTSBase * base, MpegTSPacketizerPacket * packet,
     MpegTSPacketizerSection * section);
@@ -151,6 +156,8 @@ mpegts_parse_class_init (MpegTSParseClass * klass)
 
   ts_class = GST_MPEGTS_BASE_CLASS (klass);
   ts_class->push = GST_DEBUG_FUNCPTR (mpegts_parse_push);
+  ts_class->program_started = GST_DEBUG_FUNCPTR (mpegts_parse_program_started);
+  ts_class->program_stopped = GST_DEBUG_FUNCPTR (mpegts_parse_program_stopped);
 }
 
 static void
@@ -287,6 +294,9 @@ foreach_program_activate_or_deactivate (gpointer key, gpointer value,
         parse->pads_to_add =
             g_list_append (parse->pads_to_add,
             mpegts_parse_activate_program (parse, program));
+      else {
+        program->selected = 2;
+      }
       break;
     case 0:
       /* unselected */
@@ -330,7 +340,6 @@ mpegts_parse_reset_selected_programs (MpegTSParse * parse,
         /* create the program, it will get activated once we get a PMT for it */
         program = (MpegTSParseProgram *) mpegts_base_add_program ((MpegTSBase *)
             parse, program_number, G_MAXUINT16);
-
       program->selected = 2;
       ++walk;
     }
@@ -600,6 +609,35 @@ mpegts_parse_push (MpegTSBase * base, MpegTSPacketizerPacket * packet,
   packet->buffer = NULL;
 
   return ret;
+}
+
+static void
+mpegts_parse_program_started (MpegTSBase * base, MpegTSBaseProgram * program)
+{
+  MpegTSParse *parse = GST_MPEGTS_PARSE (base);
+  MpegTSParseProgram *parseprogram = (MpegTSParseProgram *) program;
+  if (parseprogram->selected == 2) {
+    parse->pads_to_add =
+        g_list_append (parse->pads_to_add,
+        mpegts_parse_activate_program (parse, parseprogram));
+    parseprogram->selected = 1;
+    parse->need_sync_program_pads = TRUE;
+  }
+
+}
+
+static void
+mpegts_parse_program_stopped (MpegTSBase * base, MpegTSBaseProgram * program)
+{
+  MpegTSParse *parse = GST_MPEGTS_PARSE (base);
+  MpegTSParseProgram *parseprogram = (MpegTSParseProgram *) program;
+
+  if (parseprogram->active) {
+    parse->pads_to_remove =
+        g_list_append (parse->pads_to_remove,
+        mpegts_parse_deactivate_program (parse, parseprogram));
+    parse->need_sync_program_pads = TRUE;
+  }
 }
 
 static gboolean

@@ -283,7 +283,6 @@ mpegts_base_add_program (MpegTSBase * base,
   g_hash_table_insert (base->programs,
       GINT_TO_POINTER (program_number), program);
 
-  /* FIXME : Signal subclasses about new program ? */
   return program;
 }
 
@@ -474,6 +473,7 @@ mpegts_base_apply_pat (MpegTSBase * base, GstStructure * pat_info)
   MpegTSBaseProgram *program;
   gint i;
   const GValue *programs;
+  MpegTSBaseClass *klass = GST_MPEGTS_BASE_GET_CLASS (base);
 
   old_pat = base->pat;
   base->pat = gst_structure_copy (pat_info);
@@ -541,6 +541,9 @@ mpegts_base_apply_pat (MpegTSBase * base, GstStructure * pat_info)
       GST_INFO_OBJECT (base, "PAT removing program %" GST_PTR_FORMAT,
           program_info);
 
+      if (klass->program_stopped) {
+        klass->program_stopped (base, program);
+      }
       mpegts_base_deactivate_pmt (base, program);
       mpegts_base_remove_program (base, program_number);
       /* FIXME: when this happens it may still be pmt pid of another
@@ -573,6 +576,7 @@ mpegts_base_apply_pmt (MpegTSBase * base,
   gint i;
   const GValue *new_streams;
   const GValue *value;
+  MpegTSBaseClass *klass = GST_MPEGTS_BASE_GET_CLASS (base);
 
   gst_structure_id_get (pmt_info,
       QUARK_PROGRAM_NUMBER, G_TYPE_UINT, &program_number,
@@ -611,6 +615,10 @@ mpegts_base_apply_pmt (MpegTSBase * base,
     base->is_pes[pid] = TRUE;
 
   }
+  if (klass->program_started != NULL) {
+    klass->program_started (base, program);
+  }
+
   GST_OBJECT_UNLOCK (base);
 
   GST_DEBUG_OBJECT (base, "new pmt %" GST_PTR_FORMAT, pmt_info);

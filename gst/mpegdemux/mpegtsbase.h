@@ -94,6 +94,10 @@ struct _MpegTSBaseClass {
 
   /* Virtual methods */
   GstFlowReturn (*push) (MpegTSBase *base, MpegTSPacketizerPacket *packet, MpegTSPacketizerSection * section);
+  /* program_started gets called when program's pmt arrives for first time */
+  void (*program_started) (MpegTSBase *base, MpegTSBaseProgram *program);
+  /* program_stopped gets called when pat no longer has program's pmt */
+  void (*program_stopped) (MpegTSBase *base, MpegTSBaseProgram *program);
 
   /* signals */
   void (*pat_info) (GstStructure *pat);
