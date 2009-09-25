@@ -12,7 +12,8 @@ libgstmpegdemux_la_SOURCES = \
 	gstsectionfilter.c \
 	mpegtsbase.c	\
 	mpegtsparse.c \
-	mpegtspacketizer.c
+	mpegtspacketizer.c \
+	tsdemux.c
 
 libgstmpegdemux_la_CFLAGS = \
 	$(GST_PLUGINS_BASE_CFLAGS) \
@@ -35,5 +36,6 @@ noinst_HEADERS = \
 	gstsectionfilter.h \
 	mpegtsbase.h	\
 	mpegtspacketizer.h \
-	mpegtsparse.h
+	mpegtsparse.h \
+	tsdemux.h
 

@@ -50,6 +50,7 @@
 #include "mpegtsbase.h"
 #include "mpegtsparse.h"
 #include "mpegtspacketizer.h"
+#include "tsdemux.h"
 
 GST_DEBUG_CATEGORY_EXTERN (gstflupesfilter_debug);
 GST_DEBUG_CATEGORY_EXTERN (gstflusectionfilter_debug);
@@ -68,6 +69,8 @@ plugin_init (GstPlugin * plugin)
   if (!gst_mpegtsbase_plugin_init (plugin))
     return FALSE;
   if (!gst_mpegtsparse_plugin_init (plugin))
+    return FALSE;
+  if (!gst_ts_demux_plugin_init (plugin))
     return FALSE;
   return TRUE;
 }
