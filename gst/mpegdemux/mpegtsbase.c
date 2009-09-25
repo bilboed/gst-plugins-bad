@@ -209,6 +209,7 @@ mpegts_base_init (MpegTSBase * base, MpegTSBaseClass * klass)
   base->known_psi = g_new0 (gboolean, 8192);
   mpegts_base_reset (base);
   base->program_size = sizeof (MpegTSBaseProgram);
+  base->stream_size = sizeof (MpegTSBaseStream);
 }
 
 static void
@@ -352,16 +353,16 @@ mpegts_base_remove_program (MpegTSBase * base, gint program_number)
 
 static MpegTSBaseStream *
 mpegts_base_program_add_stream (MpegTSBase * base,
-    MpegTSBaseProgram * program, guint16 pid, guint8 stream_type)
+    MpegTSBaseProgram * program, guint16 pid, guint8 stream_type,
+    GstStructure * stream_info)
 {
   MpegTSBaseStream *stream;
 
-  /* FIXME : Signal subclasses ? */
-  /* FIXME : allow Stream subclasses ? */
-  stream = g_new0 (MpegTSBaseStream, 1);
+  /* FIXME: Signal subclasses ? */
+  stream = g_malloc0 (base->stream_size);
   stream->pid = pid;
   stream->stream_type = stream_type;
-
+  stream->stream_info = stream_info;
   g_hash_table_insert (program->streams, GINT_TO_POINTER ((gint) pid), stream);
 
   return stream;
@@ -601,7 +602,7 @@ mpegts_base_apply_pmt (MpegTSBase * base,
   program->pmt_info = gst_structure_copy (pmt_info);
   program->pmt_pid = pmt_pid;
   program->pcr_pid = pcr_pid;
-  mpegts_base_program_add_stream (base, program, (guint16) pcr_pid, -1);
+  mpegts_base_program_add_stream (base, program, (guint16) pcr_pid, -1, NULL);
   base->is_pes[pcr_pid] = TRUE;
 
   for (i = 0; i < gst_value_list_get_size (new_streams); ++i) {
@@ -611,7 +612,7 @@ mpegts_base_apply_pmt (MpegTSBase * base,
     gst_structure_id_get (stream, QUARK_PID, G_TYPE_UINT, &pid,
         QUARK_STREAM_TYPE, G_TYPE_UINT, &stream_type, NULL);
     mpegts_base_program_add_stream (base, program,
-        (guint16) pid, (guint8) stream_type);
+        (guint16) pid, (guint8) stream_type, stream);
     base->is_pes[pid] = TRUE;
 
   }

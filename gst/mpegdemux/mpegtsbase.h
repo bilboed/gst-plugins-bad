@@ -54,6 +54,7 @@ struct _MpegTSBaseStream
 {
   guint16 pid;
   guint8 stream_type;
+  GstStructure* stream_info;
 };
 
 struct _MpegTSBaseProgram
@@ -87,6 +88,10 @@ struct _MpegTSBase {
   /* size of the MpegTSBaseProgram structure, can be overridden
    * by subclasses if they have their own MpegTSBaseProgram subclasses. */
   gsize program_size;
+
+  /* size of the MpegTSBaseStream structure, can be overridden
+   * by subclasses if they have their own MpegTSBaseStream subclasses */
+  gsize stream_size;
 };
 
 struct _MpegTSBaseClass {
