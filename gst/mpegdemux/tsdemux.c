@@ -114,12 +114,12 @@ GST_STATIC_PAD_TEMPLATE ("audio_%04x",
     GST_PAD_SOMETIMES,
     AUDIO_CAPS);
 
-/*static GstStaticPadTemplate subpicture_template =
+static GstStaticPadTemplate subpicture_template =
 GST_STATIC_PAD_TEMPLATE ("subpicture_%04x",
     GST_PAD_SRC,
     GST_PAD_SOMETIMES,
     SUBPICTURE_CAPS);
-*/
+
 static GstStaticPadTemplate private_template =
 GST_STATIC_PAD_TEMPLATE ("private_%04x",
     GST_PAD_SRC,
@@ -257,6 +257,33 @@ get_descriptor_from_stream (TSDemuxStream * stream, guint8 tag)
   return retval;
 }
 
+/* returns NULL if no matching descriptor found *
+ * otherwise returns a descriptor that needs to *
+ * be freed */
+static guint8 *
+get_descriptor_from_program (MpegTSBaseProgram * program, guint8 tag)
+{
+  GValueArray *descriptors = NULL;
+  GstStructure *program_info = program->pmt_info;
+  guint8 *retval = NULL;
+  int i;
+
+  gst_structure_get (program_info, "descriptors", G_TYPE_VALUE_ARRAY,
+      &descriptors, NULL);
+  if (descriptors) {
+    for (i = 0; i < descriptors->n_values; i++) {
+      GValue *value = g_value_array_get_nth (descriptors, i);
+      guint8 *desc = g_value_dup_boxed (value);
+      if (DESC_TAG (desc) == tag) {
+        retval = desc;
+        break;
+      }
+    }
+    g_value_array_free (descriptors);
+  }
+  return retval;
+}
+
 static void
 create_pad_for_stream (gpointer key, gpointer value, gpointer user_data)
 {
@@ -266,7 +293,7 @@ create_pad_for_stream (gpointer key, gpointer value, gpointer user_data)
   GstCaps *caps = NULL;
   GstPadTemplate *template = NULL;
   guint8 *desc = NULL;
-  //GstTSDemux *demux = GST_TS_DEMUX (user_data);
+  GstTSDemux *demux = GST_TS_DEMUX (user_data);
 
   pid = (guint16) GPOINTER_TO_INT (key);
   g_print ("creating pad for stream %d with stream_type %d\n", pid,
@@ -297,19 +324,34 @@ create_pad_for_stream (gpointer key, gpointer value, gpointer user_data)
       desc = get_descriptor_from_stream (stream, DESC_DVB_AC3);
       if (desc) {
         g_print ("ac3 audio\n");
+        template = gst_static_pad_template_get (&audio_template);
+        name = g_strdup_printf ("audio_%04x", pid);
+        caps = gst_caps_new_simple ("audio/x-ac3", NULL);
         g_free (desc);
         break;
       }
       desc = get_descriptor_from_stream (stream, DESC_DVB_TELETEXT);
       if (desc) {
         g_print ("teletext\n");
+        template = gst_static_pad_template_get (&private_template);
+        name = g_strdup_printf ("private_%04x", pid);
+        caps = gst_caps_new_simple ("private/teletext", NULL);
         g_free (desc);
         break;
       }
       desc = get_descriptor_from_stream (stream, DESC_DVB_SUBTITLING);
       if (desc) {
         g_print ("subtitling\n");
+        template = gst_static_pad_template_get (&private_template);
+        name = g_strdup_printf ("private_%04x", pid);
+        caps = gst_caps_new_simple ("private/x-dvbsub", NULL);
         g_free (desc);
+      }
+      /* hack for itv hd (sid 10510, video pid 3401 */
+      if (demux->program_number == 10510 && pid == 3401) {
+        template = gst_static_pad_template_get (&video_template);
+        name = g_strdup_printf ("video_%04x", pid);
+        caps = gst_caps_new_simple ("video/x-h264", NULL);
       }
       break;
     case ST_HDV_AUX_V:
@@ -379,67 +421,72 @@ create_pad_for_stream (gpointer key, gpointer value, gpointer user_data)
       }
       break;
     }
-/*
     case ST_BD_AUDIO_AC3:
-    {
-      GstMpegTSStream *PMT_stream =
-          gst_mpegts_demux_get_stream_for_PID (stream->demux, stream->PMT_pid);
-      GstMPEGDescriptor *program_info = PMT_stream->PMT.program_info;
-      guint8 *desc = NULL;
+      desc = get_descriptor_from_program (demux->program, DESC_REGISTRATION);
 
-      if (program_info)
-        desc = gst_mpeg_descriptor_find (program_info, DESC_REGISTRATION);
-
-      if (desc && DESC_REGISTRATION_format_identifier (desc) == DRF_ID_HDMV) {
-        template = klass->audio_template;
-        name = g_strdup_printf ("audio_%04x", stream->PID);
-        caps = gst_caps_new_simple ("audio/x-eac3", NULL);
-      } else if (gst_mpeg_descriptor_find (stream->ES_info,
-              DESC_DVB_ENHANCED_AC3)) {
-        template = klass->audio_template;
-        name = g_strdup_printf ("audio_%04x", stream->PID);
-        caps = gst_caps_new_simple ("audio/x-eac3", NULL);
-      } else {
-        if (!gst_mpeg_descriptor_find (stream->ES_info, DESC_DVB_AC3)) {
-          GST_WARNING ("AC3 stream type found but no corresponding "
-              "descriptor to differentiate between AC3 and EAC3. "
-              "Assuming plain AC3.");
+      if (desc) {
+        if (DESC_REGISTRATION_format_identifier (desc) == DRF_ID_HDMV) {
+          template = gst_static_pad_template_get (&audio_template);
+          name = g_strdup_printf ("audio_%04x", pid);
+          caps = gst_caps_new_simple ("audio/x-eac3", NULL);
         }
-        template = klass->audio_template;
-        name = g_strdup_printf ("audio_%04x", stream->PID);
-        caps = gst_caps_new_simple ("audio/x-ac3", NULL);
+        g_free (desc);
+      }
+      if (template)
+        break;
+      else {
+        desc = get_descriptor_from_stream (stream, DESC_DVB_ENHANCED_AC3);
+        if (desc) {
+          template = gst_static_pad_template_get (&audio_template);
+          name = g_strdup_printf ("audio_%04x", pid);
+          caps = gst_caps_new_simple ("audio/x-eac3", NULL);
+          g_free (desc);
+          break;
+        } else {
+          desc = get_descriptor_from_stream (stream, DESC_DVB_AC3);
+          if (!desc)
+            GST_WARNING ("AC3 stream type found but no corresponding "
+                "descriptor to differentiate between AC3 and EAC3. "
+                "Assuming plain AC3.");
+          if (desc)
+            g_free (desc);
+          template = gst_static_pad_template_get (&audio_template);
+          name = g_strdup_printf ("audio_%04x", pid);
+          caps = gst_caps_new_simple ("audio/x-ac3", NULL);
+
+        }
       }
       break;
     case ST_BD_AUDIO_EAC3:
-      template = klass->audio_template;
-      name = g_strdup_printf ("audio_%04x", stream->PID);
+      template = gst_static_pad_template_get (&audio_template);
+      name = g_strdup_printf ("audio_%04x", pid);
       caps = gst_caps_new_simple ("audio/x-eac3", NULL);
       break;
     case ST_PS_AUDIO_DTS:
-      template = klass->audio_template;
-      name = g_strdup_printf ("audio_%04x", stream->PID);
+      template = gst_static_pad_template_get (&audio_template);
+      name = g_strdup_printf ("audio_%04x", pid);
       caps = gst_caps_new_simple ("audio/x-dts", NULL);
       break;
     case ST_PS_AUDIO_LPCM:
-      template = klass->audio_template;
-      name = g_strdup_printf ("audio_%04x", stream->PID);
+      template = gst_static_pad_template_get (&audio_template);
+      name = g_strdup_printf ("audio_%04x", pid);
       caps = gst_caps_new_simple ("audio/x-lpcm", NULL);
       break;
     case ST_BD_AUDIO_LPCM:
-      template = klass->audio_template;
-      name = g_strdup_printf ("audio_%04x", stream->PID);
+      template = gst_static_pad_template_get (&audio_template);
+      name = g_strdup_printf ("audio_%04x", pid);
       caps = gst_caps_new_simple ("audio/x-private-ts-lpcm", NULL);
       break;
     case ST_PS_DVD_SUBPICTURE:
-      template = klass->subpicture_template;
-      name = g_strdup_printf ("subpicture_%04x", stream->PID);
+      template = gst_static_pad_template_get (&subpicture_template);
+      name = g_strdup_printf ("subpicture_%04x", pid);
       caps = gst_caps_new_simple ("video/x-dvd-subpicture", NULL);
       break;
     case ST_BD_PGS_SUBPICTURE:
-      template = klass->subpicture_template;
-      name = g_strdup_printf ("subpicture_%04x", stream->PID);
+      template = gst_static_pad_template_get (&subpicture_template);
+      name = g_strdup_printf ("subpicture_%04x", pid);
       caps = gst_caps_new_simple ("subpicture/x-pgs", NULL);
-      break;*/
+      break;
   }
   if (template && name && caps) {
     GstPad *pad;
