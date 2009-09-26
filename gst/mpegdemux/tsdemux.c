@@ -30,6 +30,7 @@
 #include "mpegtsbase.h"
 #include "tsdemux.h"
 #include "gstmpegdesc.h"
+#include "gstmpegdefs.h"
 #include "mpegtspacketizer.h"
 
 /* latency in mseconds */
@@ -70,11 +71,60 @@ GST_ELEMENT_DETAILS ("MPEG transport stream demuxer",
     "Demuxes MPEG2 transport streams",
     "Zaheer Abbas Merali <zaheerabbas at merali dot org>");
 
+#define VIDEO_CAPS \
+  GST_STATIC_CAPS (\
+    "video/mpeg, " \
+      "mpegversion = (int) { 1, 2, 4 }, " \
+      "systemstream = (boolean) FALSE; " \
+    "video/x-h264;" \
+    "video/x-dirac;" \
+    "video/x-wmv," \
+      "wmvversion = (int) 3, " \
+      "format = (fourcc) WVC1" \
+  )
+
+#define AUDIO_CAPS \
+  GST_STATIC_CAPS ( \
+    "audio/mpeg, " \
+      "mpegversion = (int) { 1, 4 };" \
+    "audio/x-lpcm, " \
+      "width = (int) { 16, 20, 24 }, " \
+      "rate = (int) { 48000, 96000 }, " \
+      "channels = (int) [ 1, 8 ], " \
+      "dynamic_range = (int) [ 0, 255 ], " \
+      "emphasis = (boolean) { FALSE, TRUE }, " \
+      "mute = (boolean) { FALSE, TRUE }; " \
+    "audio/x-ac3; audio/x-eac3;" \
+    "audio/x-dts;" \
+    "audio/x-private-ts-lpcm" \
+  )
+
+/* Can also use the subpicture pads for text subtitles? */
+#define SUBPICTURE_CAPS \
+    GST_STATIC_CAPS ("subpicture/x-pgs; video/x-dvd-subpicture")
+
 static GstStaticPadTemplate video_template =
 GST_STATIC_PAD_TEMPLATE ("video_%04x", GST_PAD_SRC,
     GST_PAD_SOMETIMES,
-    GST_STATIC_CAPS ("video/mpeg, " "mpegversion = (int) { 1, 2, 4 } ")
-    );
+    VIDEO_CAPS);
+
+static GstStaticPadTemplate audio_template =
+GST_STATIC_PAD_TEMPLATE ("audio_%04x",
+    GST_PAD_SRC,
+    GST_PAD_SOMETIMES,
+    AUDIO_CAPS);
+
+/*static GstStaticPadTemplate subpicture_template =
+GST_STATIC_PAD_TEMPLATE ("subpicture_%04x",
+    GST_PAD_SRC,
+    GST_PAD_SOMETIMES,
+    SUBPICTURE_CAPS);
+*/
+static GstStaticPadTemplate private_template =
+GST_STATIC_PAD_TEMPLATE ("private_%04x",
+    GST_PAD_SRC,
+    GST_PAD_SOMETIMES,
+    GST_STATIC_CAPS_ANY);
 
 enum
 {
@@ -180,14 +230,226 @@ gst_ts_demux_get_property (GObject * object, guint prop_id,
   }
 }
 
+/* returns NULL if no matching descriptor found *
+ * otherwise returns a descriptor that needs to *
+ * be freed */
+static guint8 *
+get_descriptor_from_stream (TSDemuxStream * stream, guint8 tag)
+{
+  GValueArray *descriptors = NULL;
+  GstStructure *stream_info = stream->stream.stream_info;
+  guint8 *retval = NULL;
+  int i;
+
+  gst_structure_get (stream_info, "descriptors", G_TYPE_VALUE_ARRAY,
+      &descriptors, NULL);
+  if (descriptors) {
+    for (i = 0; i < descriptors->n_values; i++) {
+      GValue *value = g_value_array_get_nth (descriptors, i);
+      guint8 *desc = g_value_dup_boxed (value);
+      if (DESC_TAG (desc) == tag) {
+        retval = desc;
+        break;
+      }
+    }
+    g_value_array_free (descriptors);
+  }
+  return retval;
+}
+
 static void
 create_pad_for_stream (gpointer key, gpointer value, gpointer user_data)
 {
   guint16 pid;
   TSDemuxStream *stream = (TSDemuxStream *) value;
+  gchar *name = NULL;
+  GstCaps *caps = NULL;
+  GstPadTemplate *template = NULL;
+  guint8 *desc = NULL;
+  //GstTSDemux *demux = GST_TS_DEMUX (user_data);
+
   pid = (guint16) GPOINTER_TO_INT (key);
   g_print ("creating pad for stream %d with stream_type %d\n", pid,
       stream->stream.stream_type);
+  switch (stream->stream.stream_type) {
+    case ST_VIDEO_MPEG1:
+    case ST_VIDEO_MPEG2:
+      g_print ("mpeg video\n");
+      template = gst_static_pad_template_get (&video_template);
+      name = g_strdup_printf ("video_%04x", pid);
+      caps = gst_caps_new_simple ("video/mpeg",
+          "mpegversion", G_TYPE_INT,
+          stream->stream.stream_type == ST_VIDEO_MPEG1 ? 1 : 2, "systemstream",
+          G_TYPE_BOOLEAN, FALSE, NULL);
+
+      break;
+    case ST_AUDIO_MPEG1:
+    case ST_AUDIO_MPEG2:
+      g_print ("mpeg audio\n");
+      template = gst_static_pad_template_get (&audio_template);
+      name = g_strdup_printf ("audio_%04x", pid);
+      caps =
+          gst_caps_new_simple ("audio/mpeg", "mpegversion", G_TYPE_INT, 1,
+          NULL);
+      break;
+    case ST_PRIVATE_DATA:
+      g_print ("private data\n");
+      desc = get_descriptor_from_stream (stream, DESC_DVB_AC3);
+      if (desc) {
+        g_print ("ac3 audio\n");
+        g_free (desc);
+        break;
+      }
+      desc = get_descriptor_from_stream (stream, DESC_DVB_TELETEXT);
+      if (desc) {
+        g_print ("teletext\n");
+        g_free (desc);
+        break;
+      }
+      desc = get_descriptor_from_stream (stream, DESC_DVB_SUBTITLING);
+      if (desc) {
+        g_print ("subtitling\n");
+        g_free (desc);
+      }
+      break;
+    case ST_HDV_AUX_V:
+      template = gst_static_pad_template_get (&private_template);
+      name = g_strdup_printf ("private_%04x", pid);
+      caps = gst_caps_new_simple ("hdv/aux-v", NULL);
+      break;
+    case ST_HDV_AUX_A:
+      template = gst_static_pad_template_get (&private_template);
+      name = g_strdup_printf ("private_%04x", pid);
+      caps = gst_caps_new_simple ("hdv/aux-a", NULL);
+      break;
+    case ST_PRIVATE_SECTIONS:
+    case ST_MHEG:
+    case ST_DSMCC:
+      break;
+    case ST_AUDIO_AAC:
+      template = gst_static_pad_template_get (&audio_template);
+      name = g_strdup_printf ("audio_%04x", pid);
+      caps = gst_caps_new_simple ("audio/mpeg",
+          "mpegversion", G_TYPE_INT, 4, NULL);
+      break;
+    case ST_VIDEO_MPEG4:
+      template = gst_static_pad_template_get (&video_template);
+      name = g_strdup_printf ("video_%04x", pid);
+      caps = gst_caps_new_simple ("video/mpeg",
+          "mpegversion", G_TYPE_INT, 4,
+          "systemstream", G_TYPE_BOOLEAN, FALSE, NULL);
+      break;
+    case ST_VIDEO_H264:
+      template = gst_static_pad_template_get (&video_template);
+      name = g_strdup_printf ("video_%04x", pid);
+      caps = gst_caps_new_simple ("video/x-h264", NULL);
+      break;
+    case ST_VIDEO_DIRAC:
+      desc = get_descriptor_from_stream (stream, DESC_REGISTRATION);
+      if (desc) {
+        if (DESC_LENGTH (desc) >= 4) {
+          if (DESC_REGISTRATION_format_identifier (desc) == 0x64726163) {
+            g_print ("dirac\n");
+            /* dirac in hex */
+            template = gst_static_pad_template_get (&video_template);
+            name = g_strdup_printf ("video_%04x", pid);
+            caps = gst_caps_new_simple ("video/x-dirac", NULL);
+          }
+        }
+        g_free (desc);
+      }
+      break;
+    case ST_PRIVATE_EA:        /* Try to detect a VC1 stream */
+    {
+      desc = get_descriptor_from_stream (stream, DESC_REGISTRATION);
+      if (desc) {
+        if (DESC_LENGTH (desc) >= 4) {
+          if (DESC_REGISTRATION_format_identifier (desc) == DRF_ID_VC1) {
+            GST_WARNING ("0xea private stream type found but no descriptor "
+                "for VC1. Assuming plain VC1.");
+            template = gst_static_pad_template_get (&video_template);
+            name = g_strdup_printf ("video_%04x", pid);
+            caps = gst_caps_new_simple ("video/x-wmv",
+                "wmvversion", G_TYPE_INT, 3,
+                "format", GST_TYPE_FOURCC, GST_MAKE_FOURCC ('W', 'V', 'C', '1'),
+                NULL);
+          }
+        }
+        g_free (desc);
+      }
+      break;
+    }
+/*
+    case ST_BD_AUDIO_AC3:
+    {
+      GstMpegTSStream *PMT_stream =
+          gst_mpegts_demux_get_stream_for_PID (stream->demux, stream->PMT_pid);
+      GstMPEGDescriptor *program_info = PMT_stream->PMT.program_info;
+      guint8 *desc = NULL;
+
+      if (program_info)
+        desc = gst_mpeg_descriptor_find (program_info, DESC_REGISTRATION);
+
+      if (desc && DESC_REGISTRATION_format_identifier (desc) == DRF_ID_HDMV) {
+        template = klass->audio_template;
+        name = g_strdup_printf ("audio_%04x", stream->PID);
+        caps = gst_caps_new_simple ("audio/x-eac3", NULL);
+      } else if (gst_mpeg_descriptor_find (stream->ES_info,
+              DESC_DVB_ENHANCED_AC3)) {
+        template = klass->audio_template;
+        name = g_strdup_printf ("audio_%04x", stream->PID);
+        caps = gst_caps_new_simple ("audio/x-eac3", NULL);
+      } else {
+        if (!gst_mpeg_descriptor_find (stream->ES_info, DESC_DVB_AC3)) {
+          GST_WARNING ("AC3 stream type found but no corresponding "
+              "descriptor to differentiate between AC3 and EAC3. "
+              "Assuming plain AC3.");
+        }
+        template = klass->audio_template;
+        name = g_strdup_printf ("audio_%04x", stream->PID);
+        caps = gst_caps_new_simple ("audio/x-ac3", NULL);
+      }
+      break;
+    case ST_BD_AUDIO_EAC3:
+      template = klass->audio_template;
+      name = g_strdup_printf ("audio_%04x", stream->PID);
+      caps = gst_caps_new_simple ("audio/x-eac3", NULL);
+      break;
+    case ST_PS_AUDIO_DTS:
+      template = klass->audio_template;
+      name = g_strdup_printf ("audio_%04x", stream->PID);
+      caps = gst_caps_new_simple ("audio/x-dts", NULL);
+      break;
+    case ST_PS_AUDIO_LPCM:
+      template = klass->audio_template;
+      name = g_strdup_printf ("audio_%04x", stream->PID);
+      caps = gst_caps_new_simple ("audio/x-lpcm", NULL);
+      break;
+    case ST_BD_AUDIO_LPCM:
+      template = klass->audio_template;
+      name = g_strdup_printf ("audio_%04x", stream->PID);
+      caps = gst_caps_new_simple ("audio/x-private-ts-lpcm", NULL);
+      break;
+    case ST_PS_DVD_SUBPICTURE:
+      template = klass->subpicture_template;
+      name = g_strdup_printf ("subpicture_%04x", stream->PID);
+      caps = gst_caps_new_simple ("video/x-dvd-subpicture", NULL);
+      break;
+    case ST_BD_PGS_SUBPICTURE:
+      template = klass->subpicture_template;
+      name = g_strdup_printf ("subpicture_%04x", stream->PID);
+      caps = gst_caps_new_simple ("subpicture/x-pgs", NULL);
+      break;*/
+  }
+  if (template && name && caps) {
+    GstPad *pad;
+    g_print ("creating pad with name %s and caps %s\n", name,
+        gst_caps_to_string (caps));
+    pad = gst_pad_new_from_template (template, name);
+    gst_pad_use_fixed_caps (pad);
+    gst_pad_set_caps (pad, caps);
+    gst_caps_unref (caps);
+  }
 }
 
 static void
@@ -200,7 +462,7 @@ gst_ts_demux_program_started (MpegTSBase * base, MpegTSBaseProgram * program)
     g_print ("program %d started\n", program->program_number);
     demux->program_number = program->program_number;
     demux->program = program;
-    g_hash_table_foreach (program->streams, create_pad_for_stream, NULL);
+    g_hash_table_foreach (program->streams, create_pad_for_stream, demux);
   }
 }
 
