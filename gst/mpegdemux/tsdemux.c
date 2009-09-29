@@ -47,16 +47,11 @@ typedef struct _TSDemuxStream TSDemuxStream;
 struct _TSDemuxStream
 {
   MpegTSBaseStream stream;
-  TSDemuxStreamPad *pad;
-};
 
-struct _TSDemuxStreamPad
-{
   GstPad *pad;
 
   /* the pid for this pad */
   gint pid;
-  TSDemuxStream *stream;
 
   /* set to FALSE before a push and TRUE after */
   gboolean pushed;
