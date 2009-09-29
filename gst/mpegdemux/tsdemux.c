@@ -230,60 +230,6 @@ gst_ts_demux_get_property (GObject * object, guint prop_id,
   }
 }
 
-/* returns NULL if no matching descriptor found *
- * otherwise returns a descriptor that needs to *
- * be freed */
-static guint8 *
-get_descriptor_from_stream (TSDemuxStream * stream, guint8 tag)
-{
-  GValueArray *descriptors = NULL;
-  GstStructure *stream_info = stream->stream.stream_info;
-  guint8 *retval = NULL;
-  int i;
-
-  gst_structure_get (stream_info, "descriptors", G_TYPE_VALUE_ARRAY,
-      &descriptors, NULL);
-  if (descriptors) {
-    for (i = 0; i < descriptors->n_values; i++) {
-      GValue *value = g_value_array_get_nth (descriptors, i);
-      guint8 *desc = g_value_dup_boxed (value);
-      if (DESC_TAG (desc) == tag) {
-        retval = desc;
-        break;
-      }
-    }
-    g_value_array_free (descriptors);
-  }
-  return retval;
-}
-
-/* returns NULL if no matching descriptor found *
- * otherwise returns a descriptor that needs to *
- * be freed */
-static guint8 *
-get_descriptor_from_program (MpegTSBaseProgram * program, guint8 tag)
-{
-  GValueArray *descriptors = NULL;
-  GstStructure *program_info = program->pmt_info;
-  guint8 *retval = NULL;
-  int i;
-
-  gst_structure_get (program_info, "descriptors", G_TYPE_VALUE_ARRAY,
-      &descriptors, NULL);
-  if (descriptors) {
-    for (i = 0; i < descriptors->n_values; i++) {
-      GValue *value = g_value_array_get_nth (descriptors, i);
-      guint8 *desc = g_value_dup_boxed (value);
-      if (DESC_TAG (desc) == tag) {
-        retval = desc;
-        break;
-      }
-    }
-    g_value_array_free (descriptors);
-  }
-  return retval;
-}
-
 static void
 create_pad_for_stream (gpointer key, gpointer value, gpointer user_data)
 {
@@ -321,7 +267,9 @@ create_pad_for_stream (gpointer key, gpointer value, gpointer user_data)
       break;
     case ST_PRIVATE_DATA:
       g_print ("private data\n");
-      desc = get_descriptor_from_stream (stream, DESC_DVB_AC3);
+      desc =
+          mpegts_get_descriptor_from_stream ((MpegTSBaseStream *) stream,
+          DESC_DVB_AC3);
       if (desc) {
         g_print ("ac3 audio\n");
         template = gst_static_pad_template_get (&audio_template);
@@ -330,7 +278,9 @@ create_pad_for_stream (gpointer key, gpointer value, gpointer user_data)
         g_free (desc);
         break;
       }
-      desc = get_descriptor_from_stream (stream, DESC_DVB_TELETEXT);
+      desc =
+          mpegts_get_descriptor_from_stream ((MpegTSBaseStream *) stream,
+          DESC_DVB_TELETEXT);
       if (desc) {
         g_print ("teletext\n");
         template = gst_static_pad_template_get (&private_template);
@@ -339,7 +289,9 @@ create_pad_for_stream (gpointer key, gpointer value, gpointer user_data)
         g_free (desc);
         break;
       }
-      desc = get_descriptor_from_stream (stream, DESC_DVB_SUBTITLING);
+      desc =
+          mpegts_get_descriptor_from_stream ((MpegTSBaseStream *) stream,
+          DESC_DVB_SUBTITLING);
       if (desc) {
         g_print ("subtitling\n");
         template = gst_static_pad_template_get (&private_template);
@@ -387,7 +339,9 @@ create_pad_for_stream (gpointer key, gpointer value, gpointer user_data)
       caps = gst_caps_new_simple ("video/x-h264", NULL);
       break;
     case ST_VIDEO_DIRAC:
-      desc = get_descriptor_from_stream (stream, DESC_REGISTRATION);
+      desc =
+          mpegts_get_descriptor_from_stream ((MpegTSBaseStream *) stream,
+          DESC_REGISTRATION);
       if (desc) {
         if (DESC_LENGTH (desc) >= 4) {
           if (DESC_REGISTRATION_format_identifier (desc) == 0x64726163) {
@@ -403,7 +357,9 @@ create_pad_for_stream (gpointer key, gpointer value, gpointer user_data)
       break;
     case ST_PRIVATE_EA:        /* Try to detect a VC1 stream */
     {
-      desc = get_descriptor_from_stream (stream, DESC_REGISTRATION);
+      desc =
+          mpegts_get_descriptor_from_stream ((MpegTSBaseStream *) stream,
+          DESC_REGISTRATION);
       if (desc) {
         if (DESC_LENGTH (desc) >= 4) {
           if (DESC_REGISTRATION_format_identifier (desc) == DRF_ID_VC1) {
@@ -422,7 +378,9 @@ create_pad_for_stream (gpointer key, gpointer value, gpointer user_data)
       break;
     }
     case ST_BD_AUDIO_AC3:
-      desc = get_descriptor_from_program (demux->program, DESC_REGISTRATION);
+      desc =
+          mpegts_get_descriptor_from_program (demux->program,
+          DESC_REGISTRATION);
 
       if (desc) {
         if (DESC_REGISTRATION_format_identifier (desc) == DRF_ID_HDMV) {
@@ -435,7 +393,9 @@ create_pad_for_stream (gpointer key, gpointer value, gpointer user_data)
       if (template)
         break;
       else {
-        desc = get_descriptor_from_stream (stream, DESC_DVB_ENHANCED_AC3);
+        desc =
+            mpegts_get_descriptor_from_stream ((MpegTSBaseStream *) stream,
+            DESC_DVB_ENHANCED_AC3);
         if (desc) {
           template = gst_static_pad_template_get (&audio_template);
           name = g_strdup_printf ("audio_%04x", pid);
@@ -443,7 +403,9 @@ create_pad_for_stream (gpointer key, gpointer value, gpointer user_data)
           g_free (desc);
           break;
         } else {
-          desc = get_descriptor_from_stream (stream, DESC_DVB_AC3);
+          desc =
+              mpegts_get_descriptor_from_stream ((MpegTSBaseStream *) stream,
+              DESC_DVB_AC3);
           if (!desc)
             GST_WARNING ("AC3 stream type found but no corresponding "
                 "descriptor to differentiate between AC3 and EAC3. "

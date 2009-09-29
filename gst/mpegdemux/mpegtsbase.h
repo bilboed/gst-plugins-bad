@@ -116,6 +116,11 @@ GType mpegts_base_get_type(void);
 
 MpegTSBaseProgram *mpegts_base_get_program (MpegTSBase * base, gint program_number);
 MpegTSBaseProgram *mpegts_base_add_program (MpegTSBase * base, gint program_number, guint16 pmt_pid);
+
+guint8 *mpegts_get_descriptor_from_stream (MpegTSBaseStream * stream, guint8 tag);
+guint8 *mpegts_get_descriptor_from_program (MpegTSBaseProgram * program, guint8 tag);
+
+
 gboolean gst_mpegtsbase_plugin_init (GstPlugin * plugin);
 
 G_END_DECLS

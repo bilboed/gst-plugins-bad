@@ -267,6 +267,60 @@ mpegts_base_get_property (GObject * object, guint prop_id,
   }
 }
 
+/* returns NULL if no matching descriptor found *
+ * otherwise returns a descriptor that needs to *
+ * be freed */
+guint8 *
+mpegts_get_descriptor_from_stream (MpegTSBaseStream * stream, guint8 tag)
+{
+  GValueArray *descriptors = NULL;
+  GstStructure *stream_info = stream->stream_info;
+  guint8 *retval = NULL;
+  int i;
+
+  gst_structure_get (stream_info, "descriptors", G_TYPE_VALUE_ARRAY,
+      &descriptors, NULL);
+  if (descriptors) {
+    for (i = 0; i < descriptors->n_values; i++) {
+      GValue *value = g_value_array_get_nth (descriptors, i);
+      guint8 *desc = g_value_dup_boxed (value);
+      if (DESC_TAG (desc) == tag) {
+        retval = desc;
+        break;
+      }
+    }
+    g_value_array_free (descriptors);
+  }
+  return retval;
+}
+
+/* returns NULL if no matching descriptor found *
+ * otherwise returns a descriptor that needs to *
+ * be freed */
+guint8 *
+mpegts_get_descriptor_from_program (MpegTSBaseProgram * program, guint8 tag)
+{
+  GValueArray *descriptors = NULL;
+  GstStructure *program_info = program->pmt_info;
+  guint8 *retval = NULL;
+  int i;
+
+  gst_structure_get (program_info, "descriptors", G_TYPE_VALUE_ARRAY,
+      &descriptors, NULL);
+  if (descriptors) {
+    for (i = 0; i < descriptors->n_values; i++) {
+      GValue *value = g_value_array_get_nth (descriptors, i);
+      guint8 *desc = g_value_dup_boxed (value);
+      if (DESC_TAG (desc) == tag) {
+        retval = desc;
+        break;
+      }
+    }
+    g_value_array_free (descriptors);
+  }
+  return retval;
+}
+
 MpegTSBaseProgram *
 mpegts_base_add_program (MpegTSBase * base,
     gint program_number, guint16 pmt_pid)
