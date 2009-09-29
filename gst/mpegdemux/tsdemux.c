@@ -242,12 +242,12 @@ create_pad_for_stream (gpointer key, gpointer value, gpointer user_data)
   GstTSDemux *demux = GST_TS_DEMUX (user_data);
 
   pid = (guint16) GPOINTER_TO_INT (key);
-  g_print ("creating pad for stream %d with stream_type %d\n", pid,
+  GST_LOG ("creating pad for stream %d with stream_type %d", pid,
       stream->stream.stream_type);
   switch (stream->stream.stream_type) {
     case ST_VIDEO_MPEG1:
     case ST_VIDEO_MPEG2:
-      g_print ("mpeg video\n");
+      GST_LOG ("mpeg video");
       template = gst_static_pad_template_get (&video_template);
       name = g_strdup_printf ("video_%04x", pid);
       caps = gst_caps_new_simple ("video/mpeg",
@@ -258,7 +258,7 @@ create_pad_for_stream (gpointer key, gpointer value, gpointer user_data)
       break;
     case ST_AUDIO_MPEG1:
     case ST_AUDIO_MPEG2:
-      g_print ("mpeg audio\n");
+      GST_LOG ("mpeg audio");
       template = gst_static_pad_template_get (&audio_template);
       name = g_strdup_printf ("audio_%04x", pid);
       caps =
@@ -266,12 +266,12 @@ create_pad_for_stream (gpointer key, gpointer value, gpointer user_data)
           NULL);
       break;
     case ST_PRIVATE_DATA:
-      g_print ("private data\n");
+      GST_LOG ("private data");
       desc =
           mpegts_get_descriptor_from_stream ((MpegTSBaseStream *) stream,
           DESC_DVB_AC3);
       if (desc) {
-        g_print ("ac3 audio\n");
+        GST_LOG ("ac3 audio");
         template = gst_static_pad_template_get (&audio_template);
         name = g_strdup_printf ("audio_%04x", pid);
         caps = gst_caps_new_simple ("audio/x-ac3", NULL);
@@ -282,7 +282,7 @@ create_pad_for_stream (gpointer key, gpointer value, gpointer user_data)
           mpegts_get_descriptor_from_stream ((MpegTSBaseStream *) stream,
           DESC_DVB_TELETEXT);
       if (desc) {
-        g_print ("teletext\n");
+        GST_LOG ("teletext");
         template = gst_static_pad_template_get (&private_template);
         name = g_strdup_printf ("private_%04x", pid);
         caps = gst_caps_new_simple ("private/teletext", NULL);
@@ -293,7 +293,7 @@ create_pad_for_stream (gpointer key, gpointer value, gpointer user_data)
           mpegts_get_descriptor_from_stream ((MpegTSBaseStream *) stream,
           DESC_DVB_SUBTITLING);
       if (desc) {
-        g_print ("subtitling\n");
+        GST_LOG ("subtitling");
         template = gst_static_pad_template_get (&private_template);
         name = g_strdup_printf ("private_%04x", pid);
         caps = gst_caps_new_simple ("private/x-dvbsub", NULL);
@@ -345,7 +345,7 @@ create_pad_for_stream (gpointer key, gpointer value, gpointer user_data)
       if (desc) {
         if (DESC_LENGTH (desc) >= 4) {
           if (DESC_REGISTRATION_format_identifier (desc) == 0x64726163) {
-            g_print ("dirac\n");
+            GST_LOG ("dirac");
             /* dirac in hex */
             template = gst_static_pad_template_get (&video_template);
             name = g_strdup_printf ("video_%04x", pid);
@@ -452,7 +452,7 @@ create_pad_for_stream (gpointer key, gpointer value, gpointer user_data)
   }
   if (template && name && caps) {
     GstPad *pad;
-    g_print ("creating pad with name %s and caps %s\n", name,
+    GST_LOG ("creating pad with name %s and caps %s", name,
         gst_caps_to_string (caps));
     pad = gst_pad_new_from_template (template, name);
     gst_pad_use_fixed_caps (pad);
@@ -468,7 +468,7 @@ gst_ts_demux_program_started (MpegTSBase * base, MpegTSBaseProgram * program)
 
   if (demux->program_number == -1 ||
       demux->program_number == program->program_number) {
-    g_print ("program %d started\n", program->program_number);
+    GST_LOG ("program %d started", program->program_number);
     demux->program_number = program->program_number;
     demux->program = program;
     g_hash_table_foreach (program->streams, create_pad_for_stream, demux);
@@ -479,7 +479,7 @@ static void
 gst_ts_demux_program_stopped (MpegTSBase * base, MpegTSBaseProgram * program)
 {
   GstTSDemux *demux = GST_TS_DEMUX (base);
-  g_print ("program %d stopped\n", program->program_number);
+  GST_LOG ("program %d stopped", program->program_number);
 
   demux->program = NULL;
 }
@@ -530,7 +530,7 @@ gst_ts_demux_push (MpegTSBase * base, MpegTSPacketizerPacket * packet,
         g_hash_table_lookup (demux->program->streams,
         GINT_TO_POINTER (packet->pid));
     if (stream && stream->pad) {
-      g_print ("We need to demux this one: pid %d\n", packet->pid);
+      GST_LOG ("We need to demux this one: pid %dmak", packet->pid);
     }
   }
   return GST_FLOW_OK;
