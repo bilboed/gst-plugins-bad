@@ -412,12 +412,17 @@ mpegts_base_program_add_stream (MpegTSBase * base,
 {
   MpegTSBaseStream *stream;
 
-  /* FIXME: Signal subclasses ? */
+  GST_DEBUG ("pid:0x%04x, stream_type:0x%x", pid, stream_type);
+
   stream = g_malloc0 (base->stream_size);
   stream->pid = pid;
   stream->stream_type = stream_type;
   stream->stream_info = stream_info;
   g_hash_table_insert (program->streams, GINT_TO_POINTER ((gint) pid), stream);
+
+  /* FIXME : We should give subclasses a chance to fill in the newly created
+   * structure since they might want to put in some default values.
+   */
 
   return stream;
 }
@@ -432,6 +437,10 @@ static void
 mpegts_base_program_remove_stream (MpegTSBase * base,
     MpegTSBaseProgram * program, guint16 pid)
 {
+  /* FIXME : We should give subclasses a chance to clear the structure which is
+   * going to be destroyed. They might have allocated some data in it.
+   */
+
   g_hash_table_remove (program->streams, GINT_TO_POINTER ((gint) pid));
 }
 
@@ -477,11 +486,14 @@ mpegts_base_is_psi (MpegTSBase * base, MpegTSPacketizerPacket * packet)
     0x66, 0x67, 0x68, 0x69, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F, 0x70, 0x71,
     0x72, 0x73, 0x7E, 0x7F, TABLE_ID_UNSET
   };
+
   if (base->known_psi[packet->pid])
     retval = TRUE;
+
   /* check is it is a pes pid */
   if (base->is_pes[packet->pid])
     return FALSE;
+
   if (!retval) {
     if (packet->payload_unit_start_indicator) {
       table_id = *(packet->data);
