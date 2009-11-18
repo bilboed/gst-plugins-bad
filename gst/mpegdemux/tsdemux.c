@@ -558,7 +558,7 @@ static GstFlowReturn
 gst_ts_demux_push (MpegTSBase * base, MpegTSPacketizerPacket * packet,
     MpegTSPacketizerSection * section)
 {
-  GstTSDemux *demux = GST_TS_DEMUX (base);
+  GstTSDemux *demux = GST_TS_DEMUX_CAST (base);
   TSDemuxStream *stream = NULL;
 
   if (G_LIKELY (demux->program)) {
