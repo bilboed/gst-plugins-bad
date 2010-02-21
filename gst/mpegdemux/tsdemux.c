@@ -132,6 +132,10 @@ gst_ts_demux_program_stopped (MpegTSBase * base, MpegTSBaseProgram * program);
 static GstFlowReturn
 gst_ts_demux_push (MpegTSBase * base, MpegTSPacketizerPacket * packet,
     MpegTSPacketizerSection * section);
+static void
+gst_ts_demux_stream_added (MpegTSBase * base, MpegTSBaseStream * stream);
+static void
+gst_ts_demux_stream_removed (MpegTSBase * base, MpegTSBaseStream * stream);
 
 static void gst_ts_demux_set_property (GObject * object, guint prop_id,
     const GValue * value, GParamSpec * pspec);
@@ -174,6 +178,8 @@ gst_ts_demux_class_init (GstTSDemuxClass * klass)
   ts_class->push = GST_DEBUG_FUNCPTR (gst_ts_demux_push);
   ts_class->program_started = GST_DEBUG_FUNCPTR (gst_ts_demux_program_started);
   ts_class->program_stopped = GST_DEBUG_FUNCPTR (gst_ts_demux_program_stopped);
+  ts_class->stream_added = gst_ts_demux_stream_added;
+  ts_class->stream_removed = gst_ts_demux_stream_removed;
 }
 
 static void
@@ -222,29 +228,27 @@ gst_ts_demux_get_property (GObject * object, guint prop_id,
   }
 }
 
-static void
-create_pad_for_stream (gpointer key, gpointer value, gpointer user_data)
+static GstPad *
+create_pad_for_stream (GstTSDemux * demux, MpegTSBaseStream * bstream)
 {
-  guint16 pid;
-  TSDemuxStream *stream = (TSDemuxStream *) value;
+  TSDemuxStream *stream = (TSDemuxStream *) bstream;
   gchar *name = NULL;
   GstCaps *caps = NULL;
   GstPadTemplate *template = NULL;
   guint8 *desc = NULL;
-  GstTSDemux *demux = GST_TS_DEMUX (user_data);
+  GstPad *pad = NULL;
 
-  pid = (guint16) GPOINTER_TO_INT (key);
-  GST_LOG ("creating pad for stream %d with stream_type %d", pid,
-      stream->stream.stream_type);
-  switch (stream->stream.stream_type) {
+  GST_LOG ("creating pad for stream %d with stream_type %d", bstream->pid,
+      bstream->stream_type);
+  switch (bstream->stream_type) {
     case ST_VIDEO_MPEG1:
     case ST_VIDEO_MPEG2:
       GST_LOG ("mpeg video");
       template = gst_static_pad_template_get (&video_template);
-      name = g_strdup_printf ("video_%04x", pid);
+      name = g_strdup_printf ("video_%04x", bstream->pid);
       caps = gst_caps_new_simple ("video/mpeg",
           "mpegversion", G_TYPE_INT,
-          stream->stream.stream_type == ST_VIDEO_MPEG1 ? 1 : 2, "systemstream",
+          bstream->stream_type == ST_VIDEO_MPEG1 ? 1 : 2, "systemstream",
           G_TYPE_BOOLEAN, FALSE, NULL);
 
       break;
@@ -252,7 +256,7 @@ create_pad_for_stream (gpointer key, gpointer value, gpointer user_data)
     case ST_AUDIO_MPEG2:
       GST_LOG ("mpeg audio");
       template = gst_static_pad_template_get (&audio_template);
-      name = g_strdup_printf ("audio_%04x", pid);
+      name = g_strdup_printf ("audio_%04x", bstream->pid);
       caps =
           gst_caps_new_simple ("audio/mpeg", "mpegversion", G_TYPE_INT, 1,
           NULL);
@@ -265,7 +269,7 @@ create_pad_for_stream (gpointer key, gpointer value, gpointer user_data)
       if (desc) {
         GST_LOG ("ac3 audio");
         template = gst_static_pad_template_get (&audio_template);
-        name = g_strdup_printf ("audio_%04x", pid);
+        name = g_strdup_printf ("audio_%04x", bstream->pid);
         caps = gst_caps_new_simple ("audio/x-ac3", NULL);
         g_free (desc);
         break;
@@ -276,7 +280,7 @@ create_pad_for_stream (gpointer key, gpointer value, gpointer user_data)
       if (desc) {
         GST_LOG ("teletext");
         template = gst_static_pad_template_get (&private_template);
-        name = g_strdup_printf ("private_%04x", pid);
+        name = g_strdup_printf ("private_%04x", bstream->pid);
         caps = gst_caps_new_simple ("private/teletext", NULL);
         g_free (desc);
         break;
@@ -287,25 +291,25 @@ create_pad_for_stream (gpointer key, gpointer value, gpointer user_data)
       if (desc) {
         GST_LOG ("subtitling");
         template = gst_static_pad_template_get (&private_template);
-        name = g_strdup_printf ("private_%04x", pid);
+        name = g_strdup_printf ("private_%04x", bstream->pid);
         caps = gst_caps_new_simple ("private/x-dvbsub", NULL);
         g_free (desc);
       }
       /* hack for itv hd (sid 10510, video pid 3401 */
-      if (demux->program_number == 10510 && pid == 3401) {
+      if (demux->program_number == 10510 && bstream->pid == 3401) {
         template = gst_static_pad_template_get (&video_template);
-        name = g_strdup_printf ("video_%04x", pid);
+        name = g_strdup_printf ("video_%04x", bstream->pid);
         caps = gst_caps_new_simple ("video/x-h264", NULL);
       }
       break;
     case ST_HDV_AUX_V:
       template = gst_static_pad_template_get (&private_template);
-      name = g_strdup_printf ("private_%04x", pid);
+      name = g_strdup_printf ("private_%04x", bstream->pid);
       caps = gst_caps_new_simple ("hdv/aux-v", NULL);
       break;
     case ST_HDV_AUX_A:
       template = gst_static_pad_template_get (&private_template);
-      name = g_strdup_printf ("private_%04x", pid);
+      name = g_strdup_printf ("private_%04x", bstream->pid);
       caps = gst_caps_new_simple ("hdv/aux-a", NULL);
       break;
     case ST_PRIVATE_SECTIONS:
@@ -314,20 +318,20 @@ create_pad_for_stream (gpointer key, gpointer value, gpointer user_data)
       break;
     case ST_AUDIO_AAC:
       template = gst_static_pad_template_get (&audio_template);
-      name = g_strdup_printf ("audio_%04x", pid);
+      name = g_strdup_printf ("audio_%04x", bstream->pid);
       caps = gst_caps_new_simple ("audio/mpeg",
           "mpegversion", G_TYPE_INT, 4, NULL);
       break;
     case ST_VIDEO_MPEG4:
       template = gst_static_pad_template_get (&video_template);
-      name = g_strdup_printf ("video_%04x", pid);
+      name = g_strdup_printf ("video_%04x", bstream->pid);
       caps = gst_caps_new_simple ("video/mpeg",
           "mpegversion", G_TYPE_INT, 4,
           "systemstream", G_TYPE_BOOLEAN, FALSE, NULL);
       break;
     case ST_VIDEO_H264:
       template = gst_static_pad_template_get (&video_template);
-      name = g_strdup_printf ("video_%04x", pid);
+      name = g_strdup_printf ("video_%04x", bstream->pid);
       caps = gst_caps_new_simple ("video/x-h264", NULL);
       break;
     case ST_VIDEO_DIRAC:
@@ -340,7 +344,7 @@ create_pad_for_stream (gpointer key, gpointer value, gpointer user_data)
             GST_LOG ("dirac");
             /* dirac in hex */
             template = gst_static_pad_template_get (&video_template);
-            name = g_strdup_printf ("video_%04x", pid);
+            name = g_strdup_printf ("video_%04x", bstream->pid);
             caps = gst_caps_new_simple ("video/x-dirac", NULL);
           }
         }
@@ -358,7 +362,7 @@ create_pad_for_stream (gpointer key, gpointer value, gpointer user_data)
             GST_WARNING ("0xea private stream type found but no descriptor "
                 "for VC1. Assuming plain VC1.");
             template = gst_static_pad_template_get (&video_template);
-            name = g_strdup_printf ("video_%04x", pid);
+            name = g_strdup_printf ("video_%04x", bstream->pid);
             caps = gst_caps_new_simple ("video/x-wmv",
                 "wmvversion", G_TYPE_INT, 3,
                 "format", GST_TYPE_FOURCC, GST_MAKE_FOURCC ('W', 'V', 'C', '1'),
@@ -377,7 +381,7 @@ create_pad_for_stream (gpointer key, gpointer value, gpointer user_data)
       if (desc) {
         if (DESC_REGISTRATION_format_identifier (desc) == DRF_ID_HDMV) {
           template = gst_static_pad_template_get (&audio_template);
-          name = g_strdup_printf ("audio_%04x", pid);
+          name = g_strdup_printf ("audio_%04x", bstream->pid);
           caps = gst_caps_new_simple ("audio/x-eac3", NULL);
         }
         g_free (desc);
@@ -390,7 +394,7 @@ create_pad_for_stream (gpointer key, gpointer value, gpointer user_data)
             DESC_DVB_ENHANCED_AC3);
         if (desc) {
           template = gst_static_pad_template_get (&audio_template);
-          name = g_strdup_printf ("audio_%04x", pid);
+          name = g_strdup_printf ("audio_%04x", bstream->pid);
           caps = gst_caps_new_simple ("audio/x-eac3", NULL);
           g_free (desc);
           break;
@@ -405,7 +409,7 @@ create_pad_for_stream (gpointer key, gpointer value, gpointer user_data)
           if (desc)
             g_free (desc);
           template = gst_static_pad_template_get (&audio_template);
-          name = g_strdup_printf ("audio_%04x", pid);
+          name = g_strdup_printf ("audio_%04x", bstream->pid);
           caps = gst_caps_new_simple ("audio/x-ac3", NULL);
 
         }
@@ -413,37 +417,36 @@ create_pad_for_stream (gpointer key, gpointer value, gpointer user_data)
       break;
     case ST_BD_AUDIO_EAC3:
       template = gst_static_pad_template_get (&audio_template);
-      name = g_strdup_printf ("audio_%04x", pid);
+      name = g_strdup_printf ("audio_%04x", bstream->pid);
       caps = gst_caps_new_simple ("audio/x-eac3", NULL);
       break;
     case ST_PS_AUDIO_DTS:
       template = gst_static_pad_template_get (&audio_template);
-      name = g_strdup_printf ("audio_%04x", pid);
+      name = g_strdup_printf ("audio_%04x", bstream->pid);
       caps = gst_caps_new_simple ("audio/x-dts", NULL);
       break;
     case ST_PS_AUDIO_LPCM:
       template = gst_static_pad_template_get (&audio_template);
-      name = g_strdup_printf ("audio_%04x", pid);
+      name = g_strdup_printf ("audio_%04x", bstream->pid);
       caps = gst_caps_new_simple ("audio/x-lpcm", NULL);
       break;
     case ST_BD_AUDIO_LPCM:
       template = gst_static_pad_template_get (&audio_template);
-      name = g_strdup_printf ("audio_%04x", pid);
+      name = g_strdup_printf ("audio_%04x", bstream->pid);
       caps = gst_caps_new_simple ("audio/x-private-ts-lpcm", NULL);
       break;
     case ST_PS_DVD_SUBPICTURE:
       template = gst_static_pad_template_get (&subpicture_template);
-      name = g_strdup_printf ("subpicture_%04x", pid);
+      name = g_strdup_printf ("subpicture_%04x", bstream->pid);
       caps = gst_caps_new_simple ("video/x-dvd-subpicture", NULL);
       break;
     case ST_BD_PGS_SUBPICTURE:
       template = gst_static_pad_template_get (&subpicture_template);
-      name = g_strdup_printf ("subpicture_%04x", pid);
+      name = g_strdup_printf ("subpicture_%04x", bstream->pid);
       caps = gst_caps_new_simple ("subpicture/x-pgs", NULL);
       break;
   }
   if (template && name && caps) {
-    GstPad *pad;
     GST_LOG ("creating pad with name %s and caps %s", name,
         gst_caps_to_string (caps));
     pad = gst_pad_new_from_template (template, name);
@@ -451,6 +454,45 @@ create_pad_for_stream (gpointer key, gpointer value, gpointer user_data)
     gst_pad_set_caps (pad, caps);
     gst_caps_unref (caps);
   }
+
+  return pad;
+}
+
+static void
+gst_ts_demux_stream_added (MpegTSBase * base, MpegTSBaseStream * bstream)
+{
+  GstTSDemux *tsdemux = (GstTSDemux *) base;
+  TSDemuxStream *stream = (TSDemuxStream *) bstream;
+
+  if (!stream->pad) {
+    /* Create the pad */
+    stream->pad = create_pad_for_stream (tsdemux, bstream);
+  }
+  stream->flow_return = GST_FLOW_OK;
+}
+
+static void
+gst_ts_demux_stream_removed (MpegTSBase * base, MpegTSBaseStream * bstream)
+{
+  TSDemuxStream *stream = (TSDemuxStream *) bstream;
+
+  if (stream->pad) {
+    /* Unref the pad, clear it */
+    gst_object_unref (stream->pad);
+    stream->pad = NULL;
+  }
+  stream->flow_return = GST_FLOW_NOT_LINKED;
+}
+
+static void
+activate_pad_for_stream (gpointer key, TSDemuxStream * stream,
+    GstTSDemux * tsdemux)
+{
+  GST_DEBUG_OBJECT (tsdemux, "Adding pad %s:%s",
+      GST_DEBUG_PAD_NAME (stream->pad));
+  gst_pad_set_active (stream->pad, TRUE);
+  gst_element_add_pad ((GstElement *) tsdemux, stream->pad);
+  GST_DEBUG_OBJECT (tsdemux, "done adding pad");
 }
 
 static void
@@ -463,7 +505,9 @@ gst_ts_demux_program_started (MpegTSBase * base, MpegTSBaseProgram * program)
     GST_LOG ("program %d started", program->program_number);
     demux->program_number = program->program_number;
     demux->program = program;
-    g_hash_table_foreach (program->streams, create_pad_for_stream, demux);
+    /* Activate all stream pads, the pads will already have been created */
+    g_hash_table_foreach (program->streams, (GHFunc) activate_pad_for_stream,
+        demux);
   }
 }
 
