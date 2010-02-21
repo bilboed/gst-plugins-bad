@@ -410,19 +410,20 @@ mpegts_base_program_add_stream (MpegTSBase * base,
     MpegTSBaseProgram * program, guint16 pid, guint8 stream_type,
     GstStructure * stream_info)
 {
+  MpegTSBaseClass *klass = GST_MPEGTS_BASE_GET_CLASS (base);
   MpegTSBaseStream *stream;
 
-  GST_DEBUG ("pid:0x%04x, stream_type:0x%x", pid, stream_type);
+  GST_DEBUG ("pid:0x%04x, stream_type:0x%03x, stream_info:%" GST_PTR_FORMAT,
+      pid, stream_type, stream_info);
 
   stream = g_malloc0 (base->stream_size);
   stream->pid = pid;
   stream->stream_type = stream_type;
   stream->stream_info = stream_info;
-  g_hash_table_insert (program->streams, GINT_TO_POINTER ((gint) pid), stream);
 
-  /* FIXME : We should give subclasses a chance to fill in the newly created
-   * structure since they might want to put in some default values.
-   */
+  if (klass->stream_added)
+    klass->stream_added (base, stream);
+  g_hash_table_insert (program->streams, GINT_TO_POINTER ((gint) pid), stream);
 
   return stream;
 }
@@ -437,9 +438,17 @@ static void
 mpegts_base_program_remove_stream (MpegTSBase * base,
     MpegTSBaseProgram * program, guint16 pid)
 {
-  /* FIXME : We should give subclasses a chance to clear the structure which is
-   * going to be destroyed. They might have allocated some data in it.
-   */
+  MpegTSBaseClass *klass = GST_MPEGTS_BASE_GET_CLASS (base);
+
+  /* If subclass needs it, inform it of the stream we are about to remove */
+  if (klass->stream_removed) {
+    MpegTSBaseStream *stream;
+    stream =
+        g_hash_table_lookup (program->streams, GINT_TO_POINTER ((gint) pid));
+
+    if (klass->stream_removed)
+      klass->stream_removed (base, stream);
+  }
 
   g_hash_table_remove (program->streams, GINT_TO_POINTER ((gint) pid));
 }
@@ -453,8 +462,13 @@ mpegts_base_deactivate_pmt (MpegTSBase * base, MpegTSBaseProgram * program)
   GstStructure *stream;
   const GValue *streams;
   const GValue *value;
+  MpegTSBaseClass *klass = GST_MPEGTS_BASE_GET_CLASS (base);
 
   if (program->pmt_info) {
+    /* Inform subclasses we're deactivating this program */
+    if (klass->program_stopped)
+      klass->program_stopped (base, program);
+
     streams = gst_structure_id_get_value (program->pmt_info, QUARK_STREAMS);
 
     for (i = 0; i < gst_value_list_get_size (streams); ++i) {
@@ -525,7 +539,7 @@ mpegts_base_is_psi (MpegTSBase * base, MpegTSPacketizerPacket * packet)
     }
   }
 
-  GST_DEBUG_OBJECT (base, "Packet of pid 0x%x is psi: %d", packet->pid, retval);
+  GST_LOG_OBJECT (base, "Packet of pid 0x%x is psi: %d", packet->pid, retval);
   return retval;
 }
 
@@ -692,6 +706,8 @@ static void
 mpegts_base_apply_nit (MpegTSBase * base,
     guint16 pmt_pid, GstStructure * nit_info)
 {
+  GST_DEBUG_OBJECT (base, "NIT %" GST_PTR_FORMAT, nit_info);
+
   gst_element_post_message (GST_ELEMENT_CAST (base),
       gst_message_new_element (GST_OBJECT (base),
           gst_structure_copy (nit_info)));
@@ -701,6 +717,8 @@ static void
 mpegts_base_apply_sdt (MpegTSBase * base,
     guint16 pmt_pid, GstStructure * sdt_info)
 {
+  GST_DEBUG_OBJECT (base, "SDT %" GST_PTR_FORMAT, sdt_info);
+
   gst_element_post_message (GST_ELEMENT_CAST (base),
       gst_message_new_element (GST_OBJECT (base),
           gst_structure_copy (sdt_info)));
@@ -710,6 +728,8 @@ static void
 mpegts_base_apply_eit (MpegTSBase * base,
     guint16 pmt_pid, GstStructure * eit_info)
 {
+  GST_DEBUG_OBJECT (base, "EIT %" GST_PTR_FORMAT, eit_info);
+
   gst_element_post_message (GST_ELEMENT_CAST (base),
       gst_message_new_element (GST_OBJECT (base),
           gst_structure_copy (eit_info)));

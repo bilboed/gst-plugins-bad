@@ -104,6 +104,11 @@ struct _MpegTSBaseClass {
   /* program_stopped gets called when pat no longer has program's pmt */
   void (*program_stopped) (MpegTSBase *base, MpegTSBaseProgram *program);
 
+  /* stream_added is called whenever a new stream has been identified */
+  void (*stream_added) (MpegTSBase *base, MpegTSBaseStream *stream);
+  /* stream_removed is called whenever a stream is no longer referenced */
+  void (*stream_removed) (MpegTSBase *base, MpegTSBaseStream *stream);
+
   /* signals */
   void (*pat_info) (GstStructure *pat);
   void (*pmt_info) (GstStructure *pmt);
