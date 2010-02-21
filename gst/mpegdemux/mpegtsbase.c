@@ -551,7 +551,6 @@ mpegts_base_apply_pat (MpegTSBase * base, GstStructure * pat_info)
       gst_message_new_element (GST_OBJECT (base),
           gst_structure_copy (pat_info)));
 
-  GST_OBJECT_LOCK (base);
   programs = gst_structure_id_get_value (pat_info, QUARK_PROGRAMS);
   /* activate the new table */
   for (i = 0; i < gst_value_list_get_size (programs); ++i) {
@@ -622,9 +621,6 @@ mpegts_base_apply_pat (MpegTSBase * base, GstStructure * pat_info)
 
     gst_structure_free (old_pat);
   }
-
-  GST_OBJECT_UNLOCK (base);
-
 #if 0
   mpegts_base_sync_program_pads (base);
 #endif
@@ -650,7 +646,6 @@ mpegts_base_apply_pmt (MpegTSBase * base,
       QUARK_PCR_PID, G_TYPE_UINT, &pcr_pid, NULL);
   new_streams = gst_structure_id_get_value (pmt_info, QUARK_STREAMS);
 
-  GST_OBJECT_LOCK (base);
   program = mpegts_base_get_program (base, program_number);
   if (program) {
     /* deactivate old pmt */
@@ -685,8 +680,6 @@ mpegts_base_apply_pmt (MpegTSBase * base,
   if (klass->program_started != NULL) {
     klass->program_started (base, program);
   }
-
-  GST_OBJECT_UNLOCK (base);
 
   GST_DEBUG_OBJECT (base, "new pmt %" GST_PTR_FORMAT, pmt_info);
 
