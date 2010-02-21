@@ -50,9 +50,6 @@ struct _TSDemuxStream
 
   GstPad *pad;
 
-  /* the pid for this pad */
-  gint pid;
-
   /* set to FALSE before a push and TRUE after */
   gboolean pushed;
 
