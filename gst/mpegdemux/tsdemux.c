@@ -562,11 +562,13 @@ gst_ts_demux_push (MpegTSBase * base, MpegTSPacketizerPacket * packet,
   TSDemuxStream *stream = NULL;
 
   if (G_LIKELY (demux->program)) {
+    /* HOLY CRACK ! No, seriously, we're *NOT* going to be using 
+     * a hash table for figuring out the pid/stream association. */
     stream =
         g_hash_table_lookup (demux->program->streams,
         GINT_TO_POINTER (packet->pid));
     if (stream && stream->pad) {
-      GST_LOG ("We need to demux this one: pid %dmak", packet->pid);
+      GST_LOG ("We need to demux this one: pid %d", packet->pid);
     }
   }
   return GST_FLOW_OK;
