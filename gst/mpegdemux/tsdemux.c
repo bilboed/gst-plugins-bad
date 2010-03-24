@@ -236,8 +236,9 @@ create_pad_for_stream (GstTSDemux * demux, MpegTSBaseStream * bstream)
   guint8 *desc = NULL;
   GstPad *pad = NULL;
 
-  GST_LOG ("creating pad for stream %d with stream_type %d", bstream->pid,
-      bstream->stream_type);
+  GST_LOG ("Attempting to create pad for stream %d with stream_type %d",
+      bstream->pid, bstream->stream_type);
+
   switch (bstream->stream_type) {
     case ST_VIDEO_MPEG1:
     case ST_VIDEO_MPEG2:
@@ -301,14 +302,16 @@ create_pad_for_stream (GstTSDemux * demux, MpegTSBaseStream * bstream)
       }
       break;
     case ST_HDV_AUX_V:
-      template = gst_static_pad_template_get (&private_template);
-      name = g_strdup_printf ("private_%04x", bstream->pid);
-      caps = gst_caps_new_simple ("hdv/aux-v", NULL);
+      /* We don't expose those streams since they're only helper streams */
+      /* template = gst_static_pad_template_get (&private_template); */
+      /* name = g_strdup_printf ("private_%04x", bstream->pid); */
+      /* caps = gst_caps_new_simple ("hdv/aux-v", NULL); */
       break;
     case ST_HDV_AUX_A:
-      template = gst_static_pad_template_get (&private_template);
-      name = g_strdup_printf ("private_%04x", bstream->pid);
-      caps = gst_caps_new_simple ("hdv/aux-a", NULL);
+      /* We don't expose those streams since they're only helper streams */
+      /* template = gst_static_pad_template_get (&private_template); */
+      /* name = g_strdup_printf ("private_%04x", bstream->pid); */
+      /* caps = gst_caps_new_simple ("hdv/aux-a", NULL); */
       break;
     case ST_PRIVATE_SECTIONS:
     case ST_MHEG:
@@ -486,11 +489,13 @@ static void
 activate_pad_for_stream (gpointer key, TSDemuxStream * stream,
     GstTSDemux * tsdemux)
 {
-  GST_DEBUG_OBJECT (tsdemux, "Adding pad %s:%s",
-      GST_DEBUG_PAD_NAME (stream->pad));
-  gst_pad_set_active (stream->pad, TRUE);
-  gst_element_add_pad ((GstElement *) tsdemux, stream->pad);
-  GST_DEBUG_OBJECT (tsdemux, "done adding pad");
+  if (stream->pad) {
+    GST_DEBUG_OBJECT (tsdemux, "Adding pad %s:%s",
+        GST_DEBUG_PAD_NAME (stream->pad));
+    gst_pad_set_active (stream->pad, TRUE);
+    gst_element_add_pad ((GstElement *) tsdemux, stream->pad);
+    GST_DEBUG_OBJECT (tsdemux, "done adding pad");
+  }
 }
 
 static void
@@ -503,7 +508,13 @@ gst_ts_demux_program_started (MpegTSBase * base, MpegTSBaseProgram * program)
     GST_LOG ("program %d started", program->program_number);
     demux->program_number = program->program_number;
     demux->program = program;
+
     /* Activate all stream pads, the pads will already have been created */
+
+    /* FIXME : Actually, we don't want to activate *ALL* streams !
+     * For example, we don't want to expose HDV AUX private streams, we will just
+     * be using them directly for seeking and metadata. */
+
     g_hash_table_foreach (program->streams, (GHFunc) activate_pad_for_stream,
         demux);
   }
@@ -553,11 +564,44 @@ gst_ts_demux_src_pad_query (GstPad * pad, GstQuery * query)
 */
 
 static GstFlowReturn
+gst_ts_demux_handle_packet (GstTSDemux * demux, TSDemuxStream * stream,
+    MpegTSPacketizerPacket * packet, MpegTSPacketizerSection * section)
+{
+  GST_DEBUG ("buffer:%p, data:%p", GST_BUFFER_DATA (packet->buffer),
+      packet->data);
+  GST_DEBUG ("pid 0x%04x pusi:%d, afc:%d, cont:%d, payload:%p",
+      packet->pid,
+      packet->payload_unit_start_indicator,
+      packet->adaptation_field_control,
+      packet->continuity_counter, packet->payload);
+  if (packet->adaptation_field_control & 0x2) {
+    if (packet->afc_flags & MPEGTS_AFC_PCR_FLAG)
+      GST_DEBUG ("pcr:%" GST_TIME_FORMAT,
+          GST_TIME_ARGS (MPEGTIME_TO_GSTTIME (packet->pcr)));
+    if (packet->afc_flags & MPEGTS_AFC_OPCR_FLAG)
+      GST_DEBUG ("opcr:%" GST_TIME_FORMAT,
+          GST_TIME_ARGS (MPEGTIME_TO_GSTTIME (packet->opcr)));
+  }
+
+  if (section) {
+    GST_DEBUG ("section complete:%d, buffer size %d",
+        section->complete, GST_BUFFER_SIZE (section->buffer));
+  }
+
+  if (packet->payload_unit_start_indicator) {
+    GST_DEBUG ("We should flush out the data we previously accumulated");
+  }
+
+  return GST_FLOW_OK;
+}
+
+static GstFlowReturn
 gst_ts_demux_push (MpegTSBase * base, MpegTSPacketizerPacket * packet,
     MpegTSPacketizerSection * section)
 {
   GstTSDemux *demux = GST_TS_DEMUX_CAST (base);
   TSDemuxStream *stream = NULL;
+  GstFlowReturn res = GST_FLOW_OK;
 
   if (G_LIKELY (demux->program)) {
     /* HOLY CRACK ! No, seriously, we're *NOT* going to be using 
@@ -565,11 +609,12 @@ gst_ts_demux_push (MpegTSBase * base, MpegTSPacketizerPacket * packet,
     stream =
         g_hash_table_lookup (demux->program->streams,
         GINT_TO_POINTER (packet->pid));
-    if (stream && stream->pad) {
-      GST_LOG ("We need to demux this one: pid %d", packet->pid);
+
+    if (stream) {
+      res = gst_ts_demux_handle_packet (demux, stream, packet, section);
     }
   }
-  return GST_FLOW_OK;
+  return res;
 }
 
 gboolean
