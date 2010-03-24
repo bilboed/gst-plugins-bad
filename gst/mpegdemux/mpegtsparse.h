@@ -26,6 +26,7 @@
 #define GST_MPEG_TS_PARSE_H
 
 #include <gst/gst.h>
+#include "mpegtsbase.h"
 #include "mpegtspacketizer.h"
 
 G_BEGIN_DECLS
@@ -45,35 +46,20 @@ typedef struct _MpegTSParse MpegTSParse;
 typedef struct _MpegTSParseClass MpegTSParseClass;
 
 struct _MpegTSParse {
-  GstElement element;
-
-  GstPad *sinkpad;
+  MpegTSBase parent;
 
   /* the following vars must be protected with the OBJECT_LOCK as they can be
    * accessed from the application thread and the streaming thread */
   gchar *program_numbers;
   GList *pads_to_add;
   GList *pads_to_remove;
-  GHashTable *programs;
   guint req_pads;
 
-  GstStructure *pat;
-  MpegTSPacketizer *packetizer;
-  GHashTable *psi_pids;
-  GHashTable *pes_pids;
-  gboolean disposed;
   gboolean need_sync_program_pads;
 };
 
 struct _MpegTSParseClass {
-  GstElementClass parent_class;
-
-  /* signals */
-  void (*pat_info) (GstStructure *pat);
-  void (*pmt_info) (GstStructure *pmt);
-  void (*nit_info) (GstStructure *nit);
-  void (*sdt_info) (GstStructure *sdt);
-  void (*eit_info) (GstStructure *eit);
+  MpegTSBaseClass parent_class;
 };
 
 GType mpegts_parse_get_type(void);
