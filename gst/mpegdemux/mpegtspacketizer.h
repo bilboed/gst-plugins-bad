@@ -36,6 +36,9 @@
 #define MPEGTS_MIN_PACKETSIZE MPEGTS_NORMAL_PACKETSIZE
 #define MPEGTS_MAX_PACKETSIZE MPEGTS_ATSC_PACKETSIZE
 
+#define MPEGTS_AFC_PCR_FLAG	0x10
+#define MPEGTS_AFC_OPCR_FLAG	0x08
+
 G_BEGIN_DECLS
 
 #define GST_TYPE_MPEGTS_PACKETIZER \
@@ -48,7 +51,6 @@ G_BEGIN_DECLS
   (G_TYPE_CHECK_INSTANCE_TYPE((obj),GST_TYPE_MPEGTS_PACKETIZER))
 #define GST_IS_MPEGTS_PACKETIZER_CLASS(klass) \
   (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_MPEGTS_PACKETIZER))
-
 
 typedef struct _MpegTSPacketizer MpegTSPacketizer;
 typedef struct _MpegTSPacketizerClass MpegTSPacketizerClass;
@@ -91,6 +93,10 @@ typedef struct
   guint8 *data_end;
   guint8 *data;
 
+  guint8 afc_flags;
+  guint64 pcr;
+  guint64 opcr;
+  guint64 offset;
 } MpegTSPacketizerPacket;
 
 typedef struct

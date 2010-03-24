@@ -199,10 +199,10 @@ static gboolean
 mpegts_packetizer_parse_adaptation_field_control (MpegTSPacketizer * packetizer,
     MpegTSPacketizerPacket * packet)
 {
-  guint8 length;
+  guint8 length, afcflags;
+  guint8 *data;
 
-  length = *packet->data;
-  packet->data += 1;
+  length = *packet->data++;
 
   if (packet->adaptation_field_control == 0x02) {
     /* no payload, adaptation field of 183 bytes */
@@ -215,7 +215,6 @@ mpegts_packetizer_parse_adaptation_field_control (MpegTSPacketizer * packetizer,
         packet->pid, packet->adaptation_field_control, length);
   }
 
-  /* skip the adaptation field body for now */
   if (packet->data + length > packet->data_end) {
     GST_DEBUG ("PID %d afc length %d overflows the buffer current %d max %d",
         packet->pid, length, (gint) (packet->data - packet->data_start),
@@ -223,7 +222,44 @@ mpegts_packetizer_parse_adaptation_field_control (MpegTSPacketizer * packetizer,
     return FALSE;
   }
 
+  data = packet->data;
   packet->data += length;
+
+  afcflags = packet->afc_flags = *data++;
+
+  /* PCR */
+  if (afcflags & MPEGTS_AFC_PCR_FLAG) {
+    guint32 pcr1;
+    guint16 pcr2;
+    guint64 pcr, pcr_ext;
+
+    pcr1 = GST_READ_UINT32_BE (data);
+    pcr2 = GST_READ_UINT16_BE (data + 4);
+    pcr = ((guint64) pcr1) << 1;
+    pcr |= (pcr2 & 0x8000) >> 15;
+    pcr_ext = (pcr2 & 0x01ff);
+    if (pcr_ext)
+      pcr = (pcr * 300 + pcr_ext % 300) / 300;
+    packet->pcr = pcr;
+    *data += 6;
+  }
+
+  /* OPCR */
+  if (afcflags & MPEGTS_AFC_OPCR_FLAG) {
+    guint32 pcr1;
+    guint16 pcr2;
+    guint64 pcr, pcr_ext;
+
+    pcr1 = GST_READ_UINT32_BE (data);
+    pcr2 = GST_READ_UINT16_BE (data + 4);
+    pcr = ((guint64) pcr1) << 1;
+    pcr |= (pcr2 & 0x8000) >> 15;
+    pcr_ext = (pcr2 & 0x01ff);
+    if (pcr_ext)
+      pcr = (pcr * 300 + pcr_ext % 300) / 300;
+    packet->opcr = pcr;
+    *data += 6;
+  }
 
   return TRUE;
 }
