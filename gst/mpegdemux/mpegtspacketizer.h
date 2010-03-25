@@ -74,6 +74,10 @@ struct _MpegTSPacketizer {
   gboolean know_packet_size;
   guint16 packet_size;
   GstCaps *caps;
+
+  /* current offset of the tip of the adapter */
+  guint64 offset;
+  gboolean empty;
 };
 
 struct _MpegTSPacketizerClass {

@@ -155,6 +155,8 @@ static void
 mpegts_packetizer_init (MpegTSPacketizer * packetizer)
 {
   packetizer->adapter = gst_adapter_new ();
+  packetizer->offset = 0;
+  packetizer->empty = TRUE;
   packetizer->streams = g_new0 (MpegTSPacketizerStream *, 8192);
   packetizer->know_packet_size = FALSE;
 }
@@ -182,6 +184,8 @@ mpegts_packetizer_dispose (GObject * object)
     gst_adapter_clear (packetizer->adapter);
     g_object_unref (packetizer->adapter);
     packetizer->disposed = TRUE;
+    packetizer->offset = 0;
+    packetizer->empty = TRUE;
   }
 
   if (G_OBJECT_CLASS (mpegts_packetizer_parent_class)->dispose)
@@ -2068,6 +2072,8 @@ mpegts_packetizer_clear (MpegTSPacketizer * packetizer)
   }
 
   gst_adapter_clear (packetizer->adapter);
+  packetizer->offset = 0;
+  packetizer->empty = TRUE;
 }
 
 void
@@ -2095,6 +2101,10 @@ mpegts_packetizer_new (void)
 void
 mpegts_packetizer_push (MpegTSPacketizer * packetizer, GstBuffer * buffer)
 {
+  if (G_UNLIKELY (packetizer->empty)) {
+    packetizer->empty = FALSE;
+    packetizer->offset = GST_BUFFER_OFFSET (buffer);
+  }
   gst_adapter_push (packetizer->adapter, buffer);
 }
 
@@ -2145,8 +2155,10 @@ mpegts_try_discover_packet_size (MpegTSPacketizer * packetizer)
   GST_DEBUG ("have packetsize detected: %d of %u bytes",
       packetizer->know_packet_size, packetizer->packet_size);
   /* flush to sync byte */
-  if (pos > 0)
+  if (pos > 0) {
     gst_adapter_flush (packetizer->adapter, pos);
+    packetizer->offset += pos;
+  }
   g_free (dest);
 }
 
@@ -2170,17 +2182,20 @@ mpegts_packetizer_next_packet (MpegTSPacketizer * packetizer,
   guint avail;
 
   packet->buffer = NULL;
+
   if (G_UNLIKELY (!packetizer->know_packet_size)) {
     mpegts_try_discover_packet_size (packetizer);
     if (!packetizer->know_packet_size)
       return PACKET_NEED_MORE;
   }
+
   while ((avail = gst_adapter_available (packetizer->adapter)) >=
       packetizer->packet_size) {
     sync_byte = *gst_adapter_peek (packetizer->adapter, 1);
     if (G_UNLIKELY (sync_byte != 0x47)) {
       GST_DEBUG ("lost sync %02x", sync_byte);
       gst_adapter_flush (packetizer->adapter, 1);
+      packetizer->offset++;
       continue;
     }
 
@@ -2189,6 +2204,8 @@ mpegts_packetizer_next_packet (MpegTSPacketizer * packetizer,
     packet->data_start = GST_BUFFER_DATA (packet->buffer);
     packet->data_end =
         GST_BUFFER_DATA (packet->buffer) + GST_BUFFER_SIZE (packet->buffer);
+    GST_BUFFER_OFFSET (packet->buffer) = packetizer->offset;
+    packetizer->offset += packetizer->packet_size;
     return mpegts_packetizer_parse_packet (packetizer, packet);
   }
 
