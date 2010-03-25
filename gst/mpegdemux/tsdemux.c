@@ -55,6 +55,14 @@ struct _TSDemuxStream
 
   /* the return of the latest push */
   GstFlowReturn flow_return;
+
+  /* Current data to be pushed out */
+  GstBufferList *current;
+  GstBufferListIterator *currentit;
+  /* First buffer in the list, used to set/modify metadata */
+  GstBuffer *firstbuf;
+  /* Whether firstbuf has a timestamp set on it */
+  gboolean havets;
 };
 
 #define VIDEO_CAPS \
@@ -563,10 +571,72 @@ gst_ts_demux_src_pad_query (GstPad * pad, GstQuery * query)
 }
 */
 
+ /* ONLY CALL THIS WITH packet->payload != NULL */
+static inline void
+gst_ts_demux_queue_data (GstTSDemux * demux, TSDemuxStream * stream,
+    MpegTSPacketizerPacket * packet)
+{
+  GstBuffer *buf;
+
+  buf = packet->buffer;
+  /* HACK : Instead of creating a new buffer, we just modify the data/size
+   * of the buffer to point to the payload */
+  GST_BUFFER_DATA (buf) = packet->payload;
+  GST_BUFFER_SIZE (buf) = packet->data_end - packet->payload;
+
+  /* Create a new bufferlist */
+  if (G_UNLIKELY (stream->current == NULL)) {
+    stream->current = gst_buffer_list_new ();
+    stream->currentit = gst_buffer_list_iterate (stream->current);
+    gst_buffer_list_iterator_add_group (stream->currentit);
+    stream->firstbuf = buf;
+  }
+
+  /* Set the timestamp */
+  if (G_UNLIKELY ((stream->havets == FALSE) &&
+          (packet->adaptation_field_control & 0x2) &&
+          (packet->afc_flags & MPEGTS_AFC_PCR_FLAG))) {
+    GST_DEBUG ("Setting timestamp on first buffer");
+    GST_BUFFER_TIMESTAMP (stream->firstbuf) = MPEGTIME_TO_GSTTIME (packet->pcr);
+    stream->havets = TRUE;
+  }
+
+  /* We add the buffer to the list and increment the reference count
+   * since one is currently being owned by mpegpacketizer and will
+   * be removed after this packet is being processed. */
+  gst_buffer_list_iterator_add (stream->currentit, gst_buffer_ref (buf));
+}
+
+static GstFlowReturn
+gst_ts_demux_push_pending_data (GstTSDemux * demux, TSDemuxStream * stream)
+{
+  GstFlowReturn res = GST_FLOW_OK;
+
+  /* Nothing to push out */
+  if (G_UNLIKELY (stream->current == NULL))
+    goto beach;
+
+  gst_buffer_list_iterator_free (stream->currentit);
+
+  if (stream->pad) {
+    GST_DEBUG_OBJECT (stream->pad, "Pushing buffer list");
+    res = gst_pad_push_list (stream->pad, stream->current);
+    GST_DEBUG_OBJECT (stream->pad, "Returned %s", gst_flow_get_name (res));
+  }
+
+  stream->current = NULL;
+  stream->havets = FALSE;
+
+beach:
+  return res;
+}
+
 static GstFlowReturn
 gst_ts_demux_handle_packet (GstTSDemux * demux, TSDemuxStream * stream,
     MpegTSPacketizerPacket * packet, MpegTSPacketizerSection * section)
 {
+  GstFlowReturn res = GST_FLOW_OK;
+
   GST_DEBUG ("buffer:%p, data:%p", GST_BUFFER_DATA (packet->buffer),
       packet->data);
   GST_DEBUG ("pid 0x%04x pusi:%d, afc:%d, cont:%d, payload:%p",
@@ -574,6 +644,16 @@ gst_ts_demux_handle_packet (GstTSDemux * demux, TSDemuxStream * stream,
       packet->payload_unit_start_indicator,
       packet->adaptation_field_control,
       packet->continuity_counter, packet->payload);
+
+  if (section) {
+    GST_DEBUG ("section complete:%d, buffer size %d",
+        section->complete, GST_BUFFER_SIZE (section->buffer));
+  }
+
+  if (packet->payload_unit_start_indicator) {
+    res = gst_ts_demux_push_pending_data (demux, stream);
+  }
+
   if (packet->adaptation_field_control & 0x2) {
     if (packet->afc_flags & MPEGTS_AFC_PCR_FLAG)
       GST_DEBUG ("pcr:%" GST_TIME_FORMAT,
@@ -583,16 +663,10 @@ gst_ts_demux_handle_packet (GstTSDemux * demux, TSDemuxStream * stream,
           GST_TIME_ARGS (MPEGTIME_TO_GSTTIME (packet->opcr)));
   }
 
-  if (section) {
-    GST_DEBUG ("section complete:%d, buffer size %d",
-        section->complete, GST_BUFFER_SIZE (section->buffer));
-  }
+  if (packet->payload)
+    gst_ts_demux_queue_data (demux, stream, packet);
 
-  if (packet->payload_unit_start_indicator) {
-    GST_DEBUG ("We should flush out the data we previously accumulated");
-  }
-
-  return GST_FLOW_OK;
+  return res;
 }
 
 static GstFlowReturn
