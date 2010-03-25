@@ -616,6 +616,9 @@ gst_ts_demux_push_pending_data (GstTSDemux * demux, TSDemuxStream * stream)
   if (G_UNLIKELY (stream->current == NULL))
     goto beach;
 
+  /* FIXME : If needed, parse the packet to extra stream-specific information
+   * (like PTS/DTS for mpeg video streams) */
+
   gst_buffer_list_iterator_free (stream->currentit);
 
   if (stream->pad) {
@@ -656,11 +659,15 @@ gst_ts_demux_handle_packet (GstTSDemux * demux, TSDemuxStream * stream,
 
   if (packet->adaptation_field_control & 0x2) {
     if (packet->afc_flags & MPEGTS_AFC_PCR_FLAG)
-      GST_DEBUG ("pcr:%" GST_TIME_FORMAT,
-          GST_TIME_ARGS (MPEGTIME_TO_GSTTIME (packet->pcr)));
+      GST_DEBUG ("pid 0x%04x pcr:%" GST_TIME_FORMAT " at offset %"
+          G_GUINT64_FORMAT, packet->pid,
+          GST_TIME_ARGS (MPEGTIME_TO_GSTTIME (packet->pcr)),
+          GST_BUFFER_OFFSET (packet->buffer));
     if (packet->afc_flags & MPEGTS_AFC_OPCR_FLAG)
-      GST_DEBUG ("opcr:%" GST_TIME_FORMAT,
-          GST_TIME_ARGS (MPEGTIME_TO_GSTTIME (packet->opcr)));
+      GST_DEBUG ("pid 0x%04x opcr:%" GST_TIME_FORMAT " at offset %"
+          G_GUINT64_FORMAT, packet->pid,
+          GST_TIME_ARGS (MPEGTIME_TO_GSTTIME (packet->opcr)),
+          GST_BUFFER_OFFSET (packet->buffer));
   }
 
   if (packet->payload)
