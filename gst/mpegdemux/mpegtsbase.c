@@ -301,10 +301,13 @@ guint8 *
 mpegts_get_descriptor_from_program (MpegTSBaseProgram * program, guint8 tag)
 {
   GValueArray *descriptors = NULL;
-  GstStructure *program_info = program->pmt_info;
+  GstStructure *program_info;
   guint8 *retval = NULL;
   int i;
 
+  if (G_UNLIKELY (program == NULL))
+    return NULL;
+  program_info = program->pmt_info;
   gst_structure_get (program_info, "descriptors", G_TYPE_VALUE_ARRAY,
       &descriptors, NULL);
   if (descriptors) {
