@@ -334,8 +334,7 @@ mpegts_base_add_program (MpegTSBase * base,
   program->program_number = program_number;
   program->pmt_pid = pmt_pid;
   program->pcr_pid = G_MAXUINT16;
-  program->streams = g_hash_table_new_full (g_direct_hash, g_direct_equal,
-      NULL, (GDestroyNotify) mpegts_base_free_stream);
+  program->streams = g_new0 (MpegTSBaseStream *, 0x2000);
   program->patcount = 0;
 
   g_hash_table_insert (base->programs,
@@ -394,10 +393,14 @@ mpegts_base_deactivate_program (MpegTSBase * base, MpegTSBaseProgram * program)
 static void
 mpegts_base_free_program (MpegTSBaseProgram * program)
 {
+  guint i;
+
   if (program->pmt_info)
     gst_structure_free (program->pmt_info);
 
-  g_hash_table_destroy (program->streams);
+  for (i = 0; i < 0x2000; i++)
+    if (program->streams[i])
+      mpegts_base_free_stream (program->streams[i]);
 
   g_free (program);
 }
@@ -426,7 +429,7 @@ mpegts_base_program_add_stream (MpegTSBase * base,
 
   if (klass->stream_added)
     klass->stream_added (base, stream);
-  g_hash_table_insert (program->streams, GINT_TO_POINTER ((gint) pid), stream);
+  program->streams[pid] = stream;
 
   return stream;
 }
@@ -444,16 +447,11 @@ mpegts_base_program_remove_stream (MpegTSBase * base,
   MpegTSBaseClass *klass = GST_MPEGTS_BASE_GET_CLASS (base);
 
   /* If subclass needs it, inform it of the stream we are about to remove */
-  if (klass->stream_removed) {
-    MpegTSBaseStream *stream;
-    stream =
-        g_hash_table_lookup (program->streams, GINT_TO_POINTER ((gint) pid));
+  if (klass->stream_removed)
+    klass->stream_removed (base, program->streams[pid]);
 
-    if (klass->stream_removed)
-      klass->stream_removed (base, stream);
-  }
-
-  g_hash_table_remove (program->streams, GINT_TO_POINTER ((gint) pid));
+  mpegts_base_free_stream (program->streams[pid]);
+  program->streams[pid] = NULL;
 }
 
 static void

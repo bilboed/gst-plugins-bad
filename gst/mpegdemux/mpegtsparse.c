@@ -477,7 +477,7 @@ mpegts_parse_tspad_push (MpegTSParse * parse, MpegTSParsePad * tspad,
     guint16 pid, GstBuffer * buffer)
 {
   GstFlowReturn ret = GST_FLOW_NOT_LINKED;
-  GHashTable *pad_pids = NULL;
+  MpegTSBaseStream **pad_pids = NULL;
 
   if (tspad->program_number != -1) {
     if (tspad->program) {
@@ -491,8 +491,7 @@ mpegts_parse_tspad_push (MpegTSParse * parse, MpegTSParsePad * tspad,
     }
   }
 
-  if (pad_pids == NULL ||
-      g_hash_table_lookup (pad_pids, GINT_TO_POINTER ((gint) pid)) != NULL) {
+  if (pad_pids == NULL || pad_pids[pid]) {
     /* push if there's no filter or if the pid is in the filter */
     ret = gst_pad_push (tspad->pad, buffer);
   } else {

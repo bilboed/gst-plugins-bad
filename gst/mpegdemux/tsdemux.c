@@ -496,8 +496,7 @@ gst_ts_demux_stream_removed (MpegTSBase * base, MpegTSBaseStream * bstream)
 }
 
 static void
-activate_pad_for_stream (gpointer key, TSDemuxStream * stream,
-    GstTSDemux * tsdemux)
+activate_pad_for_stream (GstTSDemux * tsdemux, TSDemuxStream * stream)
 {
   if (stream->pad) {
     GST_DEBUG_OBJECT (tsdemux, "Adding pad %s:%s",
@@ -515,6 +514,8 @@ gst_ts_demux_program_started (MpegTSBase * base, MpegTSBaseProgram * program)
 
   if (demux->program_number == -1 ||
       demux->program_number == program->program_number) {
+    guint i;
+
     GST_LOG ("program %d started", program->program_number);
     demux->program_number = program->program_number;
     demux->program = program;
@@ -524,9 +525,10 @@ gst_ts_demux_program_started (MpegTSBase * base, MpegTSBaseProgram * program)
     /* FIXME : Actually, we don't want to activate *ALL* streams !
      * For example, we don't want to expose HDV AUX private streams, we will just
      * be using them directly for seeking and metadata. */
+    for (i = 0; i < 0x2000; i++)
+      if (program->streams[i])
+        activate_pad_for_stream (demux, (TSDemuxStream *) program->streams[i]);
 
-    g_hash_table_foreach (program->streams, (GHFunc) activate_pad_for_stream,
-        demux);
   }
 }
 
@@ -687,11 +689,7 @@ gst_ts_demux_push (MpegTSBase * base, MpegTSPacketizerPacket * packet,
   GstFlowReturn res = GST_FLOW_OK;
 
   if (G_LIKELY (demux->program)) {
-    /* HOLY CRACK ! No, seriously, we're *NOT* going to be using 
-     * a hash table for figuring out the pid/stream association. */
-    stream =
-        g_hash_table_lookup (demux->program->streams,
-        GINT_TO_POINTER (packet->pid));
+    stream = (TSDemuxStream *) demux->program->streams[packet->pid];
 
     if (stream) {
       res = gst_ts_demux_handle_packet (demux, stream, packet, section);

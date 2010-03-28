@@ -63,7 +63,7 @@ struct _MpegTSBaseProgram
   guint16 pmt_pid;
   guint16 pcr_pid;
   GstStructure *pmt_info;
-  GHashTable *streams;
+  MpegTSBaseStream **streams;
   gint patcount;
 };
 
