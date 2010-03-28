@@ -126,6 +126,7 @@ enum
 {
   ARG_0,
   PROP_PROGRAM_NUMBER,
+  PROP_EMIT_STATS,
   /* FILL ME */
 };
 
@@ -188,6 +189,12 @@ gst_ts_demux_class_init (GstTSDemuxClass * klass)
           "Program Number to demux for (-1 to ignore)", -1, G_MAXINT,
           -1, G_PARAM_READWRITE));
 
+  g_object_class_install_property (gobject_class, PROP_EMIT_STATS,
+      g_param_spec_boolean ("emit-stats", "Emit statistics",
+          "Emit messages for every pcr/opcr/pts/dts", FALSE,
+          G_PARAM_READWRITE));
+
+
   ts_class = GST_MPEGTS_BASE_CLASS (klass);
   ts_class->push = GST_DEBUG_FUNCPTR (gst_ts_demux_push);
   ts_class->program_started = GST_DEBUG_FUNCPTR (gst_ts_demux_program_started);
@@ -222,6 +229,9 @@ gst_ts_demux_set_property (GObject * object, guint prop_id,
        * beginning */
       demux->program_number = g_value_get_int (value);
       break;
+    case PROP_EMIT_STATS:
+      demux->emit_statistics = g_value_get_boolean (value);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
   }
@@ -236,6 +246,9 @@ gst_ts_demux_get_property (GObject * object, guint prop_id,
   switch (prop_id) {
     case PROP_PROGRAM_NUMBER:
       g_value_set_int (value, demux->program_number);
+      break;
+    case PROP_EMIT_STATS:
+      g_value_set_boolean (value, demux->emit_statistics);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);

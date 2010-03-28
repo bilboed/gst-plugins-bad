@@ -56,6 +56,7 @@ struct _GstTSDemux {
   guint program_number;
   MpegTSBaseProgram * program;
 
+  gboolean emit_statistics;
 };
 
 struct _GstTSDemuxClass {
