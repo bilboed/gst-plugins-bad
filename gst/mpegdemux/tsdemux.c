@@ -256,6 +256,8 @@ gst_ts_demux_finalize (GObject * object)
     G_OBJECT_CLASS (parent_class)->finalize (object);
 }
 
+
+
 static void
 gst_ts_demux_set_property (GObject * object, guint prop_id,
     const GValue * value, GParamSpec * pspec)
@@ -304,7 +306,7 @@ create_pad_for_stream (GstTSDemux * demux, MpegTSBaseStream * bstream)
   guint8 *desc = NULL;
   GstPad *pad = NULL;
 
-  GST_LOG ("Attempting to create pad for stream %d with stream_type %d",
+  GST_LOG ("Attempting to create pad for stream 0x%04x with stream_type %d",
       bstream->pid, bstream->stream_type);
 
   switch (bstream->stream_type) {
@@ -516,7 +518,7 @@ create_pad_for_stream (GstTSDemux * demux, MpegTSBaseStream * bstream)
       break;
   }
   if (template && name && caps) {
-    GST_LOG ("creating pad with name %s and caps %s", name,
+    GST_LOG ("stream:%p creating pad with name %s and caps %s", stream, name,
         gst_caps_to_string (caps));
     pad = gst_pad_new_from_template (template, name);
     gst_pad_use_fixed_caps (pad);
@@ -557,11 +559,11 @@ static void
 activate_pad_for_stream (GstTSDemux * tsdemux, TSDemuxStream * stream)
 {
   if (stream->pad) {
-    GST_DEBUG_OBJECT (tsdemux, "Adding pad %s:%s",
-        GST_DEBUG_PAD_NAME (stream->pad));
+    GST_DEBUG_OBJECT (tsdemux, "Activating pad %s:%s for stream %p",
+        GST_DEBUG_PAD_NAME (stream->pad), stream);
     gst_pad_set_active (stream->pad, TRUE);
     gst_element_add_pad ((GstElement *) tsdemux, stream->pad);
-    GST_DEBUG_OBJECT (tsdemux, "done adding pad");
+    GST_DEBUG_OBJECT (stream->pad, "done adding pad");
   }
 }
 
@@ -931,7 +933,7 @@ gst_ts_demux_handle_packet (GstTSDemux * demux, TSDemuxStream * stream,
 
   GST_DEBUG ("buffer:%p, data:%p", GST_BUFFER_DATA (packet->buffer),
       packet->data);
-  GST_DEBUG ("pid 0x%04x pusi:%d, afc:%d, cont:%d, payload:%p",
+  GST_LOG ("pid 0x%04x pusi:%d, afc:%d, cont:%d, payload:%p",
       packet->pid,
       packet->payload_unit_start_indicator,
       packet->adaptation_field_control,
@@ -942,9 +944,9 @@ gst_ts_demux_handle_packet (GstTSDemux * demux, TSDemuxStream * stream,
         section->complete, GST_BUFFER_SIZE (section->buffer));
   }
 
-  if (packet->payload_unit_start_indicator) {
+  if (G_UNLIKELY (packet->payload_unit_start_indicator))
+    /* Flush previous data */
     res = gst_ts_demux_push_pending_data (demux, stream);
-  }
 
   if (packet->adaptation_field_control & 0x2) {
     if (packet->afc_flags & MPEGTS_AFC_PCR_FLAG)
