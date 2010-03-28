@@ -28,6 +28,7 @@
 #endif
 
 #include <stdlib.h>
+#include <string.h>
 
 #include "mpegtsbase.h"
 #include "tsdemux.h"
@@ -40,10 +41,11 @@
 
 #define TABLE_ID_UNSET 0xFF
 
+/* Size of the pendingbuffers array. */
+#define TS_MAX_PENDING_BUFFERS	256
+
 GST_DEBUG_CATEGORY_STATIC (ts_demux_debug);
 #define GST_CAT_DEFAULT ts_demux_debug
-
-typedef struct _TSDemuxStreamPad TSDemuxStreamPad;
 
 static GQuark QUARK_TSDEMUX;
 static GQuark QUARK_PID;
@@ -90,10 +92,6 @@ struct _TSDemuxStream
   /* Current data to be pushed out */
   GstBufferList *current;
   GstBufferListIterator *currentit;
-  /* First buffer in the list, used to set/modify metadata */
-  GstBuffer *firstbuf;
-  /* Whether firstbuf has a timestamp set on it */
-  gboolean havets;
 };
 
 #define VIDEO_CAPS \
@@ -689,13 +687,159 @@ gst_ts_demux_record_dts (GstTSDemux * demux, TSDemuxStream * stream,
   }
 }
 
+static GstFlowReturn
+gst_ts_demux_parse_pes_header (GstTSDemux * demux, TSDemuxStream * stream)
+{
+  GstFlowReturn res = GST_FLOW_OK;
+  guint8 *data;
+  guint32 length;
+  guint32 psc_stid;
+  guint8 stid;
+  guint16 pesplength;
+  guint8 PES_header_data_length = 0;
 
- /* ONLY CALL THIS WITH packet->payload != NULL */
+  data = GST_BUFFER_DATA (stream->pendingbuffers[0]);
+  length = GST_BUFFER_SIZE (stream->pendingbuffers[0]);
+
+  GST_MEMDUMP ("Header buffer", data, MIN (length, 32));
+
+  /* packet_start_code_prefix           24
+   * stream_id                          8*/
+  psc_stid = GST_READ_UINT32_BE (data);
+  data += 4;
+  length -= 4;
+  if (G_UNLIKELY ((psc_stid & 0xfffffff00) != 0x000000100)) {
+    GST_WARNING ("WRONG PACKET START CODE !");
+    goto discont;
+  }
+  stid = psc_stid & 0x000000ff;
+  GST_LOG ("stream_id:0x%02x", stid);
+
+  /* PES_packet_length                  16 */
+  /* FIXME : store the expected pes length somewhere ? */
+  pesplength = GST_READ_UINT16_BE (data);
+  data += 2;
+  length -= 2;
+  GST_LOG ("PES_packet_length:%d", pesplength);
+
+  /* FIXME : Only parse header on streams which require it (see table 2-21) */
+  if (stid != 0xbf) {
+    guint8 p1, p2;
+    guint64 pts, dts;
+    p1 = *data++;
+    p2 = *data++;
+    PES_header_data_length = *data++ + 3;
+    length -= 3;
+
+    GST_LOG ("0x%02x 0x%02x 0x%02x", p1, p2, PES_header_data_length);
+    GST_LOG ("PES header data length:%d", PES_header_data_length);
+
+    /* '10'                             2
+     * PES_scrambling_control           2
+     * PES_priority                     1
+     * data_alignment_indicator         1
+     * copyright                        1
+     * original_or_copy                 1 */
+    if (G_UNLIKELY ((p1 & 0xc0) != 0x80)) {
+      GST_WARNING ("p1 >> 6 != 0x2");
+      goto discont;
+    }
+
+    /* PTS_DTS_flags                    2
+     * ESCR_flag                        1
+     * ES_rate_flag                     1
+     * DSM_trick_mode_flag              1
+     * additional_copy_info_flag        1
+     * PES_CRC_flag                     1
+     * PES_extension_flag               1*/
+
+    /* PES_header_data_length           8 */
+    if (G_UNLIKELY (length < PES_header_data_length)) {
+      GST_WARNING ("length < PES_header_data_length");
+      goto discont;
+    }
+
+    /*  PTS                             32 */
+    if ((p2 & 0x80)) {          /* PTS */
+      READ_TS (data, pts, discont);
+      gst_ts_demux_record_pts (demux, stream, pts,
+          GST_BUFFER_OFFSET (stream->pendingbuffers[0]));
+      length -= 4;
+      GST_BUFFER_TIMESTAMP (stream->pendingbuffers[0]) =
+          MPEGTIME_TO_GSTTIME (pts);
+    }
+    /*  DTS                             32 */
+    if ((p2 & 0x40)) {          /* DTS */
+      READ_TS (data, dts, discont);
+      gst_ts_demux_record_dts (demux, stream, dts,
+          GST_BUFFER_OFFSET (stream->pendingbuffers[0]));
+      length -= 4;
+    }
+    /* ESCR                             48 */
+    if ((p2 & 0x20)) {
+      GST_LOG ("ESCR present");
+      data += 6;
+      length -= 6;
+    }
+    /* ES_rate                          24 */
+    if ((p2 & 0x10)) {
+      GST_LOG ("ES_rate present");
+      data += 3;
+      length -= 3;
+    }
+    /* DSM_trick_mode                   8 */
+    if ((p2 & 0x08)) {
+      GST_LOG ("DSM_trick_mode present");
+      data += 1;
+      length -= 1;
+    }
+  }
+
+  /* Remove PES headers */
+  GST_BUFFER_DATA (stream->pendingbuffers[0]) += 6 + PES_header_data_length;
+  GST_BUFFER_SIZE (stream->pendingbuffers[0]) -= 6 + PES_header_data_length;
+
+  /* FIXME : responsible for switching to PENDING_PACKET_BUFFER and
+   * creating the bufferlist */
+  if (1) {
+    /* Append to the buffer list */
+    /* FIXME : THIS SHOULD ACTUALLY BE DONE IN _parse_pes_header() */
+    if (G_UNLIKELY (stream->current == NULL)) {
+      guint8 i;
+
+      /* Create a new bufferlist */
+      stream->current = gst_buffer_list_new ();
+      stream->currentit = gst_buffer_list_iterate (stream->current);
+      gst_buffer_list_iterator_add_group (stream->currentit);
+
+      /* Push pending buffers into the list */
+      for (i = 0; i < stream->nbpending; i++)
+        gst_buffer_list_iterator_add (stream->currentit,
+            stream->pendingbuffers[i]);
+      memset (stream->pendingbuffers, 0, TS_MAX_PENDING_BUFFERS);
+      stream->nbpending = 0;
+    }
+    stream->state = PENDING_PACKET_BUFFER;
+  }
+
+  return res;
+
+discont:
+  stream->state = PENDING_PACKET_DISCONT;
+  return res;
+}
+
+ /* ONLY CALL THIS:
+  * * WITH packet->payload != NULL
+  * * WITH pending/current flushed out if beginning of new PES packet
+  */
 static inline void
 gst_ts_demux_queue_data (GstTSDemux * demux, TSDemuxStream * stream,
     MpegTSPacketizerPacket * packet)
 {
   GstBuffer *buf;
+
+  GST_DEBUG ("state:%d", stream->state);
 
   buf = packet->buffer;
   /* HACK : Instead of creating a new buffer, we just modify the data/size
@@ -703,53 +847,79 @@ gst_ts_demux_queue_data (GstTSDemux * demux, TSDemuxStream * stream,
   GST_BUFFER_DATA (buf) = packet->payload;
   GST_BUFFER_SIZE (buf) = packet->data_end - packet->payload;
 
-  /* Create a new bufferlist */
-  if (G_UNLIKELY (stream->current == NULL)) {
-    stream->current = gst_buffer_list_new ();
-    stream->currentit = gst_buffer_list_iterate (stream->current);
-    gst_buffer_list_iterator_add_group (stream->currentit);
-    stream->firstbuf = buf;
+  if (stream->state == PENDING_PACKET_EMPTY) {
+    if (G_UNLIKELY (!packet->payload_unit_start_indicator)) {
+      stream->state = PENDING_PACKET_DISCONT;
+      GST_WARNING ("Didn't get the first packet of this PES");
+    } else {
+      GST_LOG ("EMPTY=>HEADER");
+      stream->state = PENDING_PACKET_HEADER;
+    }
   }
 
-  /* Set the timestamp */
-  if (G_UNLIKELY ((stream->havets == FALSE) &&
-          (packet->adaptation_field_control & 0x2) &&
-          (packet->afc_flags & MPEGTS_AFC_PCR_FLAG))) {
-    GST_DEBUG ("Setting timestamp on first buffer");
-    GST_BUFFER_TIMESTAMP (stream->firstbuf) = MPEGTIME_TO_GSTTIME (packet->pcr);
-    stream->havets = TRUE;
+  if (stream->state == PENDING_PACKET_HEADER) {
+    GST_LOG ("HEADER: appending data to array");
+    /* Append to the array */
+    stream->pendingbuffers[stream->nbpending++] = buf;
+
+    /* parse the header */
+    gst_ts_demux_parse_pes_header (demux, stream);
+  } else if (stream->state == PENDING_PACKET_BUFFER) {
+    GST_LOG ("BUFFER: appending data to bufferlist");
+    gst_buffer_list_iterator_add (stream->currentit, buf);
   }
 
-  /* We add the buffer to the list and increment the reference count
-   * since one is currently being owned by mpegpacketizer and will
-   * be removed after this packet is being processed. */
-  gst_buffer_list_iterator_add (stream->currentit, gst_buffer_ref (buf));
+
+  return;
 }
 
 static GstFlowReturn
 gst_ts_demux_push_pending_data (GstTSDemux * demux, TSDemuxStream * stream)
 {
   GstFlowReturn res = GST_FLOW_OK;
+  MpegTSBaseStream *bs = (MpegTSBaseStream *) stream;
+  /* guint8 i; */
 
-  /* Nothing to push out */
-  if (G_UNLIKELY (stream->current == NULL))
+  GST_DEBUG ("stream:%p, pid:0x%04x stream_type:%d state:%d pad:%s:%s",
+      stream, bs->pid, bs->stream_type, stream->state,
+      GST_DEBUG_PAD_NAME (stream->pad));
+
+  if (G_UNLIKELY (stream->current == NULL)) {
+    GST_LOG ("stream->current == NULL");
     goto beach;
-
-  /* FIXME : If needed, parse the packet to extra stream-specific information
-   * (like PTS/DTS for mpeg video streams) */
-
-  gst_buffer_list_iterator_free (stream->currentit);
-
-  if (stream->pad) {
-    GST_DEBUG_OBJECT (stream->pad, "Pushing buffer list");
-    res = gst_pad_push_list (stream->pad, stream->current);
-    GST_DEBUG_OBJECT (stream->pad, "Returned %s", gst_flow_get_name (res));
   }
 
-  stream->current = NULL;
-  stream->havets = FALSE;
+  if (G_UNLIKELY (stream->state == PENDING_PACKET_EMPTY)) {
+    GST_LOG ("EMPTY: returning");
+    goto beach;
+  }
+
+  /* We have a confirmed buffer, let's push it out */
+  if (stream->state == PENDING_PACKET_BUFFER) {
+    GST_LOG ("BUFFER: pushing out pending data");
+    gst_buffer_list_iterator_free (stream->currentit);
+
+    if (stream->pad) {
+      GST_DEBUG_OBJECT (stream->pad, "Pushing buffer list");
+      res = gst_pad_push_list (stream->pad, stream->current);
+      GST_DEBUG_OBJECT (stream->pad, "Returned %s", gst_flow_get_name (res));
+      /* FIXME : combine flow returns */
+      res = GST_FLOW_OK;
+    }
+  }
 
 beach:
+  /* Reset everything */
+  GST_LOG ("Resetting to EMPTY");
+  stream->state = PENDING_PACKET_EMPTY;
+
+  /* for (i = 0; i < stream->nbpending; i++) */
+  /*   gst_buffer_unref (stream->pendingbuffers[i]); */
+  memset (stream->pendingbuffers, 0, TS_MAX_PENDING_BUFFERS);
+  stream->nbpending = 0;
+
+  stream->current = NULL;
+
   return res;
 }
 
