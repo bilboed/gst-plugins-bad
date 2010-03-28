@@ -44,6 +44,15 @@ GST_DEBUG_CATEGORY_STATIC (ts_demux_debug);
 #define GST_CAT_DEFAULT ts_demux_debug
 
 typedef struct _TSDemuxStreamPad TSDemuxStreamPad;
+
+static GQuark QUARK_TSDEMUX;
+static GQuark QUARK_PID;
+static GQuark QUARK_PCR;
+static GQuark QUARK_OPCR;
+static GQuark QUARK_PTS;
+static GQuark QUARK_DTS;
+static GQuark QUARK_OFFSET;
+
 typedef struct _TSDemuxStream TSDemuxStream;
 
 struct _TSDemuxStream
@@ -150,7 +159,22 @@ static void gst_ts_demux_finalize (GObject * object);
 /*
 static gboolean gst_ts_demux_src_pad_query (GstPad * pad, GstQuery * query);
 */
-GST_BOILERPLATE (GstTSDemux, gst_ts_demux, MpegTSBase, GST_TYPE_MPEGTS_BASE);
+static void _extra_init (GType type);
+
+GST_BOILERPLATE_FULL (GstTSDemux, gst_ts_demux, MpegTSBase,
+    GST_TYPE_MPEGTS_BASE, _extra_init);
+
+static void
+_extra_init (GType type)
+{
+  QUARK_TSDEMUX = g_quark_from_string ("tsdemux");
+  QUARK_PID = g_quark_from_string ("pid");
+  QUARK_PCR = g_quark_from_string ("pcr");
+  QUARK_OPCR = g_quark_from_string ("opcr");
+  QUARK_PTS = g_quark_from_string ("pts");
+  QUARK_DTS = g_quark_from_string ("dts");
+  QUARK_OFFSET = g_quark_from_string ("offset");
+}
 
 static void
 gst_ts_demux_base_init (gpointer klass)
