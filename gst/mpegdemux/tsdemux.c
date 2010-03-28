@@ -758,14 +758,10 @@ gst_ts_demux_handle_packet (GstTSDemux * demux, TSDemuxStream * stream,
 
   if (packet->adaptation_field_control & 0x2) {
     if (packet->afc_flags & MPEGTS_AFC_PCR_FLAG)
-      GST_DEBUG ("pid 0x%04x pcr:%" GST_TIME_FORMAT " at offset %"
-          G_GUINT64_FORMAT, packet->pid,
-          GST_TIME_ARGS (MPEGTIME_TO_GSTTIME (packet->pcr)),
+      gst_ts_demux_record_pcr (demux, stream, packet->pcr,
           GST_BUFFER_OFFSET (packet->buffer));
     if (packet->afc_flags & MPEGTS_AFC_OPCR_FLAG)
-      GST_DEBUG ("pid 0x%04x opcr:%" GST_TIME_FORMAT " at offset %"
-          G_GUINT64_FORMAT, packet->pid,
-          GST_TIME_ARGS (MPEGTIME_TO_GSTTIME (packet->opcr)),
+      gst_ts_demux_record_opcr (demux, stream, packet->opcr,
           GST_BUFFER_OFFSET (packet->buffer));
   }
 
