@@ -2108,58 +2108,73 @@ mpegts_packetizer_push (MpegTSPacketizer * packetizer, GstBuffer * buffer)
   gst_adapter_push (packetizer->adapter, buffer);
 }
 
-static void
+static gboolean
 mpegts_try_discover_packet_size (MpegTSPacketizer * packetizer)
 {
   guint8 *dest;
-  int i, pos, j;
-  static const guint psizes[] = { MPEGTS_NORMAL_PACKETSIZE,
+  int i, pos = -1, j;
+  static const guint psizes[] = {
+    MPEGTS_NORMAL_PACKETSIZE,
     MPEGTS_M2TS_PACKETSIZE,
     MPEGTS_DVB_ASI_PACKETSIZE,
     MPEGTS_ATSC_PACKETSIZE
   };
-  /* wait for 3 sync bytes */
-  /* so first return if there is not enough data for 4 * max packetsize */
-  if (gst_adapter_available_fast (packetizer->adapter) <
-      MPEGTS_MAX_PACKETSIZE * 4)
-    return;
-  /* check for sync bytes */
+
   dest = g_malloc (MPEGTS_MAX_PACKETSIZE * 4);
-  gst_adapter_copy (packetizer->adapter, dest, 0, MPEGTS_MAX_PACKETSIZE * 4);
-  /* find first sync byte */
-  pos = -1;
-  for (i = 0; i < MPEGTS_MAX_PACKETSIZE; i++) {
-    if (dest[i] == 0x47) {
-      for (j = 0; j < 4; j++) {
-        guint packetsize = psizes[j];
-        /* check each of the packet size possibilities in turn */
-        if (dest[i] == 0x47 && dest[i + packetsize] == 0x47 &&
-            dest[i + packetsize * 2] == 0x47 &&
-            dest[i + packetsize * 3] == 0x47) {
-          gchar *str;
-          packetizer->know_packet_size = TRUE;
-          packetizer->packet_size = packetsize;
-          str =
-              g_strdup_printf
-              ("video/mpegts, systemstream=(boolean)true, packetsize=%d",
-              packetsize);
-          packetizer->caps = gst_caps_from_string ((const gchar *) str);
-          g_free (str);
-          pos = i;
-          break;
+  /* wait for 3 sync bytes */
+  while (gst_adapter_available (packetizer->adapter) >=
+      MPEGTS_MAX_PACKETSIZE * 4) {
+
+    /* check for sync bytes */
+    gst_adapter_copy (packetizer->adapter, dest, 0, MPEGTS_MAX_PACKETSIZE * 4);
+    /* find first sync byte */
+    pos = -1;
+    for (i = 0; i < MPEGTS_MAX_PACKETSIZE; i++) {
+      if (dest[i] == 0x47) {
+        for (j = 0; j < 4; j++) {
+          guint packetsize = psizes[j];
+          /* check each of the packet size possibilities in turn */
+          if (dest[i] == 0x47 && dest[i + packetsize] == 0x47 &&
+              dest[i + packetsize * 2] == 0x47 &&
+              dest[i + packetsize * 3] == 0x47) {
+            gchar *str;
+            packetizer->know_packet_size = TRUE;
+            packetizer->packet_size = packetsize;
+            str =
+                g_strdup_printf
+                ("video/mpegts, systemstream=(boolean)true, packetsize=%d",
+                packetsize);
+            packetizer->caps = gst_caps_from_string ((const gchar *) str);
+            g_free (str);
+            pos = i;
+            break;
+          }
         }
+        break;
       }
+    }
+
+    if (packetizer->know_packet_size)
       break;
+
+    /* Skip MPEGTS_MAX_PACKETSIZE */
+    gst_adapter_flush (packetizer->adapter, MPEGTS_MAX_PACKETSIZE);
+    packetizer->offset += MPEGTS_MAX_PACKETSIZE;
+  }
+
+  g_free (dest);
+
+  if (packetizer->know_packet_size) {
+    GST_DEBUG ("have packetsize detected: %u bytes", packetizer->packet_size);
+    /* flush to sync byte */
+    if (pos > 0) {
+      GST_DEBUG ("Flushing out %d bytes");
+      gst_adapter_flush (packetizer->adapter, pos);
+      packetizer->offset += pos;
     }
   }
-  GST_DEBUG ("have packetsize detected: %d of %u bytes",
-      packetizer->know_packet_size, packetizer->packet_size);
-  /* flush to sync byte */
-  if (pos > 0) {
-    gst_adapter_flush (packetizer->adapter, pos);
-    packetizer->offset += pos;
-  }
-  g_free (dest);
+
+  return packetizer->know_packet_size;
 }
 
 
@@ -2167,8 +2182,7 @@ gboolean
 mpegts_packetizer_has_packets (MpegTSPacketizer * packetizer)
 {
   if (G_UNLIKELY (packetizer->know_packet_size == FALSE)) {
-    mpegts_try_discover_packet_size (packetizer);
-    if (!packetizer->know_packet_size)
+    if (!mpegts_try_discover_packet_size (packetizer))
       return FALSE;
   }
   return gst_adapter_available (packetizer->adapter) >= packetizer->packet_size;
@@ -2184,8 +2198,7 @@ mpegts_packetizer_next_packet (MpegTSPacketizer * packetizer,
   packet->buffer = NULL;
 
   if (G_UNLIKELY (!packetizer->know_packet_size)) {
-    mpegts_try_discover_packet_size (packetizer);
-    if (!packetizer->know_packet_size)
+    if (!mpegts_try_discover_packet_size (packetizer))
       return PACKET_NEED_MORE;
   }
 
