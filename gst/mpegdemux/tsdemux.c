@@ -784,7 +784,11 @@ gst_ts_demux_push (MpegTSBase * base, MpegTSPacketizerPacket * packet,
 
     if (stream) {
       res = gst_ts_demux_handle_packet (demux, stream, packet, section);
-    }
+    } else if (packet->buffer)
+      gst_buffer_unref (packet->buffer);
+  } else {
+    if (packet->buffer)
+      gst_buffer_unref (packet->buffer);
   }
   return res;
 }

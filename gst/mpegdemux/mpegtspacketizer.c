@@ -2229,8 +2229,6 @@ void
 mpegts_packetizer_clear_packet (MpegTSPacketizer * packetizer,
     MpegTSPacketizerPacket * packet)
 {
-  if (packet->buffer)
-    gst_buffer_unref (packet->buffer);
   memset (packet, 0, sizeof (MpegTSPacketizerPacket));
 }
 
