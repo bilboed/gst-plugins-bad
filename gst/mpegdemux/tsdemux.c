@@ -156,9 +156,6 @@ static void gst_ts_demux_set_property (GObject * object, guint prop_id,
 static void gst_ts_demux_get_property (GObject * object, guint prop_id,
     GValue * value, GParamSpec * pspec);
 static void gst_ts_demux_finalize (GObject * object);
-/*
-static gboolean gst_ts_demux_src_pad_query (GstPad * pad, GstQuery * query);
-*/
 static void _extra_init (GType type);
 
 GST_BOILERPLATE_FULL (GstTSDemux, gst_ts_demux, MpegTSBase,
@@ -584,39 +581,94 @@ gst_ts_demux_program_stopped (MpegTSBase * base, MpegTSBaseProgram * program)
   demux->program = NULL;
 }
 
-/*
-static gboolean
-gst_ts_demux_src_pad_query (GstPad * pad, GstQuery * query)
+static inline void
+gst_ts_demux_record_pcr (GstTSDemux * demux, TSDemuxStream * stream,
+    guint64 pcr, guint64 offset)
 {
-  GstTSDemux *demux = GST_TS_DEMUX (gst_pad_get_parent (pad));
-  gboolean res;
+  MpegTSBaseStream *bs = (MpegTSBaseStream *) stream;
 
-  switch (GST_QUERY_TYPE (query)) {
-    case GST_QUERY_LATENCY:
-    {
-      if ((res = gst_pad_peer_query (((MpegTSBase *) demux)->sinkpad, query))) {
-        gboolean is_live;
-        GstClockTime min_latency, max_latency;
+  GST_LOG ("pid 0x%04x pcr:%" GST_TIME_FORMAT " at offset %"
+      G_GUINT64_FORMAT, bs->pid,
+      GST_TIME_ARGS (MPEGTIME_TO_GSTTIME (pcr)), offset);
 
-        gst_query_parse_latency (query, &is_live, &min_latency, &max_latency);
-        if (is_live) {
-          min_latency += TS_LATENCY * GST_MSECOND;
-          if (max_latency != GST_CLOCK_TIME_NONE)
-            max_latency += TS_LATENCY * GST_MSECOND;
-        }
-
-        gst_query_set_latency (query, is_live, min_latency, max_latency);
-      }
-
-      break;
-    }
-    default:
-      res = gst_pad_query_default (pad, query);
+  if (G_UNLIKELY (demux->emit_statistics)) {
+    GstStructure *st;
+    st = gst_structure_id_empty_new (QUARK_TSDEMUX);
+    gst_structure_id_set (st,
+        QUARK_PID, G_TYPE_UINT, bs->pid,
+        QUARK_OFFSET, G_TYPE_UINT64, offset, QUARK_PCR, G_TYPE_UINT64, pcr,
+        NULL);
+    gst_element_post_message (GST_ELEMENT_CAST (demux),
+        gst_message_new_element (GST_OBJECT (demux), st));
   }
-  gst_object_unref (demux);
-  return res;
 }
-*/
+
+static inline void
+gst_ts_demux_record_opcr (GstTSDemux * demux, TSDemuxStream * stream,
+    guint64 opcr, guint64 offset)
+{
+  MpegTSBaseStream *bs = (MpegTSBaseStream *) stream;
+
+  GST_LOG ("pid 0x%04x opcr:%" GST_TIME_FORMAT " at offset %"
+      G_GUINT64_FORMAT, bs->pid,
+      GST_TIME_ARGS (MPEGTIME_TO_GSTTIME (opcr)), offset);
+
+  if (G_UNLIKELY (demux->emit_statistics)) {
+    GstStructure *st;
+    st = gst_structure_id_empty_new (QUARK_TSDEMUX);
+    gst_structure_id_set (st,
+        QUARK_PID, G_TYPE_UINT, bs->pid,
+        QUARK_OFFSET, G_TYPE_UINT64, offset,
+        QUARK_OPCR, G_TYPE_UINT64, opcr, NULL);
+    gst_element_post_message (GST_ELEMENT_CAST (demux),
+        gst_message_new_element (GST_OBJECT (demux), st));
+  }
+}
+
+static inline void
+gst_ts_demux_record_pts (GstTSDemux * demux, TSDemuxStream * stream,
+    guint64 pts, guint64 offset)
+{
+  MpegTSBaseStream *bs = (MpegTSBaseStream *) stream;
+
+  GST_LOG ("pid 0x%04x pts:%" GST_TIME_FORMAT " at offset %"
+      G_GUINT64_FORMAT, bs->pid,
+      GST_TIME_ARGS (MPEGTIME_TO_GSTTIME (pts)), offset);
+
+  if (G_UNLIKELY (demux->emit_statistics)) {
+    GstStructure *st;
+    st = gst_structure_id_empty_new (QUARK_TSDEMUX);
+    gst_structure_id_set (st,
+        QUARK_PID, G_TYPE_UINT, bs->pid,
+        QUARK_OFFSET, G_TYPE_UINT64, offset, QUARK_PTS, G_TYPE_UINT64, pts,
+        NULL);
+    gst_element_post_message (GST_ELEMENT_CAST (demux),
+        gst_message_new_element (GST_OBJECT (demux), st));
+  }
+}
+
+static inline void
+gst_ts_demux_record_dts (GstTSDemux * demux, TSDemuxStream * stream,
+    guint64 dts, guint64 offset)
+{
+  MpegTSBaseStream *bs = (MpegTSBaseStream *) stream;
+
+  GST_LOG ("pid 0x%04x dts:%" GST_TIME_FORMAT " at offset %"
+      G_GUINT64_FORMAT, bs->pid,
+      GST_TIME_ARGS (MPEGTIME_TO_GSTTIME (dts)), offset);
+
+  if (G_UNLIKELY (demux->emit_statistics)) {
+    GstStructure *st;
+    st = gst_structure_id_empty_new (QUARK_TSDEMUX);
+    gst_structure_id_set (st,
+        QUARK_PID, G_TYPE_UINT, bs->pid,
+        QUARK_OFFSET, G_TYPE_UINT64, offset, QUARK_DTS, G_TYPE_UINT64, dts,
+        NULL);
+    gst_element_post_message (GST_ELEMENT_CAST (demux),
+        gst_message_new_element (GST_OBJECT (demux), st));
+  }
+}
+
 
  /* ONLY CALL THIS WITH packet->payload != NULL */
 static inline void
