@@ -53,6 +53,18 @@ static GQuark QUARK_PTS;
 static GQuark QUARK_DTS;
 static GQuark QUARK_OFFSET;
 
+typedef enum
+{
+  PENDING_PACKET_EMPTY = 0,     /* No pending packet/buffer
+                                 * Push incoming buffers to the array */
+  PENDING_PACKET_HEADER,        /* PES header needs to be parsed
+                                 * Push incoming buffers to the array */
+  PENDING_PACKET_BUFFER,        /* Currently filling up output buffer
+                                 * Push incoming buffers to the bufferlist */
+  PENDING_PACKET_DISCONT        /* Discontinuity in incoming packets
+                                 * Drop all incoming buffers */
+} PendingPacketState;
+
 typedef struct _TSDemuxStream TSDemuxStream;
 
 struct _TSDemuxStream
@@ -66,6 +78,14 @@ struct _TSDemuxStream
 
   /* the return of the latest push */
   GstFlowReturn flow_return;
+
+  /* Output data */
+  PendingPacketState state;
+  /* Pending buffers array. */
+  /* These buffers are stored in this array until the PES header (if needed)
+   * is succesfully parsed. */
+  GstBuffer *pendingbuffers[TS_MAX_PENDING_BUFFERS];
+  guint8 nbpending;
 
   /* Current data to be pushed out */
   GstBufferList *current;
