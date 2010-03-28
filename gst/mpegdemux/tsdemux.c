@@ -1,9 +1,11 @@
 /*
  * tsdemux.c - 
  * Copyright (C) 2009 Zaheer Abbas Merali
+ *               2010 Edward Hervey
  * 
  * Authors:
  *   Zaheer Abbas Merali <zaheerabbas at merali dot org>
+ *   Edward Hervey <bilboed at gmail dot com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
