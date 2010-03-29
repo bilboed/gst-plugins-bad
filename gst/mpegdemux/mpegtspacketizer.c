@@ -2066,9 +2066,9 @@ mpegts_packetizer_clear (MpegTSPacketizer * packetizer)
     for (i = 0; i < 8192; i++) {
       if (packetizer->streams[i]) {
         mpegts_packetizer_stream_free (packetizer->streams[i]);
-        packetizer->streams[i] = NULL;
       }
     }
+    memset (packetizer->streams, 0, 8192 * sizeof (MpegTSPacketizerStream *));
   }
 
   gst_adapter_clear (packetizer->adapter);
@@ -2122,8 +2122,7 @@ mpegts_try_discover_packet_size (MpegTSPacketizer * packetizer)
 
   dest = g_malloc (MPEGTS_MAX_PACKETSIZE * 4);
   /* wait for 3 sync bytes */
-  while (gst_adapter_available (packetizer->adapter) >=
-      MPEGTS_MAX_PACKETSIZE * 4) {
+  while (packetizer->adapter->size >= MPEGTS_MAX_PACKETSIZE * 4) {
 
     /* check for sync bytes */
     gst_adapter_copy (packetizer->adapter, dest, 0, MPEGTS_MAX_PACKETSIZE * 4);
@@ -2177,7 +2176,6 @@ mpegts_try_discover_packet_size (MpegTSPacketizer * packetizer)
   return packetizer->know_packet_size;
 }
 
-
 gboolean
 mpegts_packetizer_has_packets (MpegTSPacketizer * packetizer)
 {
@@ -2185,7 +2183,7 @@ mpegts_packetizer_has_packets (MpegTSPacketizer * packetizer)
     if (!mpegts_try_discover_packet_size (packetizer))
       return FALSE;
   }
-  return gst_adapter_available (packetizer->adapter) >= packetizer->packet_size;
+  return packetizer->adapter->size >= packetizer->packet_size;
 }
 
 MpegTSPacketizerPacketReturn
@@ -2202,8 +2200,7 @@ mpegts_packetizer_next_packet (MpegTSPacketizer * packetizer,
       return PACKET_NEED_MORE;
   }
 
-  while ((avail = gst_adapter_available (packetizer->adapter)) >=
-      packetizer->packet_size) {
+  while ((avail = packetizer->adapter->size) >= packetizer->packet_size) {
     sync_byte = *gst_adapter_peek (packetizer->adapter, 1);
     if (G_UNLIKELY (sync_byte != 0x47)) {
       GST_DEBUG ("lost sync %02x", sync_byte);
@@ -2287,7 +2284,7 @@ mpegts_packetizer_push_section (MpegTSPacketizer * packetizer,
           "not complete (last_continuity: %d continuity: %d sec len %d buffer %d avail %d",
           packet->pid, table_id, subtable_extension, stream->continuity_counter,
           packet->continuity_counter, section_length, GST_BUFFER_SIZE (sub_buf),
-          gst_adapter_available (stream->section_adapter));
+          stream->section_adapter->size);
       mpegts_packetizer_clear_section (packetizer, stream);
     } else {
       GST_DEBUG
@@ -2325,8 +2322,7 @@ mpegts_packetizer_push_section (MpegTSPacketizer * packetizer,
 
     /* >= as sections can be padded and padding is not included in
      * section_length */
-    if (gst_adapter_available (stream->section_adapter) >=
-        stream->section_length + 3) {
+    if (stream->section_adapter->size >= stream->section_length + 3) {
       res = mpegts_packetizer_parse_section_header (packetizer,
           stream, section);
 
