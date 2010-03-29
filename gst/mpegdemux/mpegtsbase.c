@@ -68,6 +68,9 @@ static void mpegts_base_finalize (GObject * object);
 static void mpegts_base_free_program (MpegTSBaseProgram * program);
 static void mpegts_base_free_stream (MpegTSBaseStream * ptream);
 
+static gboolean mpegts_base_sink_activate (GstPad * pad);
+static gboolean mpegts_base_sink_activate_pull (GstPad * pad, gboolean active);
+static gboolean mpegts_base_sink_activate_push (GstPad * pad, gboolean active);
 static GstFlowReturn mpegts_base_chain (GstPad * pad, GstBuffer * buf);
 static gboolean mpegts_base_sink_event (GstPad * pad, GstEvent * event);
 static GstStateChangeReturn mpegts_base_change_state (GstElement * element,
@@ -196,6 +199,11 @@ static void
 mpegts_base_init (MpegTSBase * base, MpegTSBaseClass * klass)
 {
   base->sinkpad = gst_pad_new_from_static_template (&sink_template, "sink");
+  gst_pad_set_activate_function (base->sinkpad, mpegts_base_sink_activate);
+  gst_pad_set_activatepull_function (base->sinkpad,
+      mpegts_base_sink_activate_pull);
+  gst_pad_set_activatepush_function (base->sinkpad,
+      mpegts_base_sink_activate_push);
   gst_pad_set_chain_function (base->sinkpad, mpegts_base_chain);
   gst_pad_set_event_function (base->sinkpad, mpegts_base_sink_event);
   gst_element_add_pad (GST_ELEMENT (base), base->sinkpad);
@@ -210,6 +218,8 @@ mpegts_base_init (MpegTSBase * base, MpegTSBaseClass * klass)
   mpegts_base_reset (base);
   base->program_size = sizeof (MpegTSBaseProgram);
   base->stream_size = sizeof (MpegTSBaseStream);
+
+  base->mode = BASE_MODE_SCANNING;
 }
 
 static void
@@ -925,6 +935,109 @@ mpegts_base_chain (GstPad * pad, GstBuffer * buf)
   gst_object_unref (base);
   return res;
 }
+
+static GstFlowReturn
+mpegts_base_scan (MpegTSBase * base)
+{
+  GstFlowReturn ret;
+  GstBuffer *buf;
+  guint i;
+
+  GST_DEBUG ("Scanning for initial sync point");
+
+  /* Find initial sync point */
+  for (i = 0; i < 10; i++) {
+    ret = gst_pad_pull_range (base->sinkpad, i * 50 * MPEGTS_MAX_PACKETSIZE,
+        50 * MPEGTS_MAX_PACKETSIZE, &buf);
+    if (G_UNLIKELY (ret != GST_FLOW_OK))
+      goto beach;
+    /* Push to packetizer */
+    mpegts_packetizer_push (base->packetizer, buf);
+    if (mpegts_packetizer_has_packets (base->packetizer)) {
+      base->initial_sync_point = base->seek_offset = base->packetizer->offset;
+      base->packetsize = base->packetizer->packet_size;
+      goto beach;
+    }
+  }
+
+  GST_WARNING ("Didn't find initial sync point");
+  ret = GST_FLOW_ERROR;
+
+beach:
+  mpegts_packetizer_clear (base->packetizer);
+  return ret;
+}
+
+static void
+mpegts_base_loop (MpegTSBase * base)
+{
+  GstFlowReturn ret = GST_FLOW_ERROR;
+
+  switch (base->mode) {
+    case BASE_MODE_SCANNING:
+      /* Find first sync point */
+      ret = mpegts_base_scan (base);
+      if (G_UNLIKELY (ret != GST_FLOW_OK))
+        goto error;
+      base->mode = BASE_MODE_STREAMING;
+      break;
+    case BASE_MODE_SEEKING:
+      /* FIXME : yes, we should do something here */
+      base->mode = BASE_MODE_STREAMING;
+      break;
+    case BASE_MODE_STREAMING:
+    {
+      GstBuffer *buf;
+
+      GST_DEBUG ("Pulling data from %" G_GUINT64_FORMAT, base->seek_offset);
+
+      ret = gst_pad_pull_range (base->sinkpad, base->seek_offset,
+          100 * base->packetsize, &buf);
+      base->seek_offset += GST_BUFFER_SIZE (buf);
+      if (G_UNLIKELY (ret != GST_FLOW_OK))
+        goto error;
+      ret = mpegts_base_chain (base->sinkpad, buf);
+      if (G_UNLIKELY (ret != GST_FLOW_OK))
+        goto error;
+    }
+      break;
+  }
+
+  return;
+error:
+  GST_DEBUG_OBJECT (base, "Pausing task, reason %s", gst_flow_get_name (ret));
+  gst_pad_pause_task (base->sinkpad);
+}
+
+static gboolean
+mpegts_base_sink_activate (GstPad * pad)
+{
+  if (gst_pad_check_pull_range (pad)) {
+    GST_DEBUG_OBJECT (pad, "activating pull");
+    return gst_pad_activate_pull (pad, TRUE);
+  } else {
+    GST_DEBUG_OBJECT (pad, "activating push");
+    return gst_pad_activate_push (pad, TRUE);
+  }
+}
+
+static gboolean
+mpegts_base_sink_activate_pull (GstPad * pad, gboolean active)
+{
+  MpegTSBase *base = GST_MPEGTS_BASE (GST_OBJECT_PARENT (pad));
+
+  if (active)
+    return gst_pad_start_task (pad, (GstTaskFunction) mpegts_base_loop, base);
+  else
+    return gst_pad_stop_task (pad);
+}
+
+static gboolean
+mpegts_base_sink_activate_push (GstPad * pad, gboolean active)
+{
+  return TRUE;
+}
+
 
 static GstStateChangeReturn
 mpegts_base_change_state (GstElement * element, GstStateChange transition)

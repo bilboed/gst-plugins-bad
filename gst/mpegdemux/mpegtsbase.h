@@ -67,11 +67,25 @@ struct _MpegTSBaseProgram
   gint patcount;
 };
 
+typedef enum {
+  BASE_MODE_SCANNING,
+  BASE_MODE_SEEKING,
+  BASE_MODE_STREAMING
+} MpegTSBaseMode;
 
 struct _MpegTSBase {
   GstElement element;
 
   GstPad *sinkpad;
+
+  /* pull-based behaviour */
+  MpegTSBaseMode mode;
+  /* location of first sync point */
+  guint64	initial_sync_point;
+  /* Current pull offset (also set by seek handler) */
+  guint64	seek_offset;
+  /* Cached packetsize */
+  guint16	packetsize;
 
   /* the following vars must be protected with the OBJECT_LOCK as they can be
    * accessed from the application thread and the streaming thread */
