@@ -27,6 +27,7 @@
 #endif
 
 #include <stdlib.h>
+#include <string.h>
 
 #include "mpegtsbase.h"
 #include "gstmpegdesc.h"
@@ -179,12 +180,9 @@ mpegts_base_class_init (MpegTSBaseClass * klass)
 static void
 mpegts_base_reset (MpegTSBase * base)
 {
-  int i;
   mpegts_packetizer_clear (base->packetizer);
-  for (i = 0; i < 8192; i++) {
-    base->is_pes[i] = FALSE;
-    base->known_psi[i] = FALSE;
-  }
+  memset (base->is_pes, 0, 8192);
+  memset (base->known_psi, 0, 8192);
 
   /* PAT */
   base->known_psi[0] = TRUE;

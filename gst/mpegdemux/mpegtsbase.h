@@ -93,7 +93,9 @@ struct _MpegTSBase {
 
   GstStructure *pat;
   MpegTSPacketizer *packetizer;
-  /* arrays that say whether a pid is a known psi pid or a pes pid */
+
+  /* arrays that say whether a pid is a known psi pid or a pes pid
+   * FIXME: Make these bit arrays so we can make them 8 times smaller */
   gboolean *known_psi;
   gboolean *is_pes;
 
