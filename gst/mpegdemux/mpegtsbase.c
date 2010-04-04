@@ -993,9 +993,9 @@ mpegts_base_loop (MpegTSBase * base)
 
       ret = gst_pad_pull_range (base->sinkpad, base->seek_offset,
           100 * base->packetsize, &buf);
-      base->seek_offset += GST_BUFFER_SIZE (buf);
       if (G_UNLIKELY (ret != GST_FLOW_OK))
         goto error;
+      base->seek_offset += GST_BUFFER_SIZE (buf);
       ret = mpegts_base_chain (base->sinkpad, buf);
       if (G_UNLIKELY (ret != GST_FLOW_OK))
         goto error;
