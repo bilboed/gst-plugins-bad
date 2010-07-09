@@ -186,9 +186,17 @@ mpegts_base_reset (MpegTSBase * base)
 
   /* PAT */
   base->known_psi[0] = TRUE;
-  if (base->pat != NULL)
-    gst_structure_free (base->pat);
-  base->pat = NULL;
+
+  /* FIXME : Commenting the Following lines is to be in sync with the following
+   * commit
+   *
+   * 61a885613316ce7657c36a6cd215b43f9dc67b79
+   *     mpegtsparse: don't free PAT structure which may still be needed later
+   */
+
+  /* if (base->pat != NULL) */
+  /*   gst_structure_free (base->pat); */
+  /* base->pat = NULL; */
   /* pmt pids will be added and removed dynamically */
 
 }
