@@ -2049,7 +2049,6 @@ error:
   return NULL;
 }
 
-
 void
 mpegts_packetizer_clear (MpegTSPacketizer * packetizer)
 {
